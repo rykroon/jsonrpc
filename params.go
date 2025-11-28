@@ -6,64 +6,63 @@ import (
 	"fmt"
 )
 
-type Params json.RawMessage
+type Params struct {
+	data json.RawMessage
+}
 
-func NewParams(v any) (Params, error) {
+func NewParams(v any) (*Params, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal json: %w", err)
 	}
 
-	params := Params(data)
-	if !params.IsNamed() || !params.IsPositional() {
+	params := &Params{data: data}
+	if !params.IsNamed() && !params.IsPositional() {
 		return nil, errors.New("invalid params")
 	}
 
-	return Params(data), nil
-}
-
-func NoParams() Params {
-	return Params{}
+	return params, nil
 }
 
 func (p Params) String() string {
-	return string(p)
+	return string(p.data)
+}
+
+func (p Params) IsPositional() bool {
+	return len(p.data) != 0 && p.data[0] == '['
+}
+
+func (p Params) IsNamed() bool {
+	return len(p.data) != 0 && p.data[0] == '{'
+}
+
+func (p *Params) MarshalJSON() ([]byte, error) {
+	return json.Marshal(p.data)
 }
 
 func (p *Params) UnmarshalJSON(data []byte) error {
-	*p = append((*p)[:0], data...)
-	if p.IsEmpty() || p.IsNamed() || p.IsPositional() {
+	err := json.Unmarshal(data, &p.data)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal json: %w", err)
+	}
+	if p.IsNamed() || p.IsPositional() {
 		return nil
 	}
 	return errors.New("not a valid params type")
 }
 
-func (p Params) IsEmpty() bool {
-	return len(p) == 0
+type Positional interface {
+	GetParamPointers() []any
 }
 
-func (p Params) IsPositional() bool {
-	return len(p) != 0 && p[0] == '['
-}
-
-func (p Params) IsNamed() bool {
-	return len(p) != 0 && p[0] == '{'
-}
-
-func (p Params) DecodeInto(v any) error {
-	if p.IsEmpty() {
-		return nil
-	}
+// Decode the params into a value
+func (p *Params) DecodeInto(v any) error {
 	if p.IsPositional() {
 		if positional, ok := v.(Positional); ok {
 			pointers := positional.GetParamPointers()
-			return json.Unmarshal(p, &pointers)
+			return json.Unmarshal(p.data, &pointers)
 		}
 		return fmt.Errorf("type %T does not support positional params", v)
 	}
-	return json.Unmarshal(p, v)
-}
-
-type Positional interface {
-	GetParamPointers() []any
+	return json.Unmarshal(p.data, v)
 }

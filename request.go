@@ -1,28 +1,25 @@
 package jsonrpc
 
 type Request struct {
-	Jsonrpc string `json:"jsonrpc"`
-	Method  string `json:"method"`
-	Params  Params `json:"params,omitzero"`
-	Id      Id     `json:"id,omitzero"`
+	JsonRpc string  `json:"jsonrpc"`
+	Method  string  `json:"method"`
+	Params  *Params `json:"params,omitzero"`
+	Id      *Id     `json:"id,omitzero"`
 }
 
-func NewRequest(method string, params Params, id Id) *Request {
+func NewRequest(method string, params *Params, id *Id) *Request {
 	return &Request{
-		Jsonrpc: "2.0",
+		JsonRpc: "2.0",
 		Method:  method,
 		Params:  params,
 		Id:      id,
 	}
 }
 
-func (r Request) IsNotification() bool {
-	return r.Id.IsEmpty()
+func NewNotification(method string, params *Params) *Request {
+	return NewRequest(method, params, nil)
 }
 
-func (r Request) IdForResponse() Id {
-	if r.Id.IsEmpty() {
-		return NullId()
-	}
-	return r.Id
+func (r Request) IsNotification() bool {
+	return r.Id == nil
 }

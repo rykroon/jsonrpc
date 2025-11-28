@@ -3,69 +3,50 @@ package jsonrpc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 )
 
-type Id json.RawMessage
-
-type IdConstraint interface {
-	string | int
+// A JSON-RPC Id
+type Id struct {
+	data json.RawMessage
 }
 
-func NewId[T IdConstraint](v T) Id {
+// Create a new JSON-RPC Id
+func NewId[T string | int](v T) *Id {
 	data, err := json.Marshal(v)
 	if err != nil {
 		panic(err) // this should never happen
 	}
-	return Id(data)
-}
-
-func NoId() Id {
-	return Id([]byte{})
-}
-
-func NullId() Id {
-	return Id("null")
+	return &Id{data: data}
 }
 
 func (id Id) String() string {
-	return string(id)
+	return string(id.data)
 }
 
 func (id Id) MarshalJSON() ([]byte, error) {
-	// overrides default behavior of base64 encoded bytes.
-	return id, nil
+	return json.Marshal(id.data)
 }
 
 func (i *Id) UnmarshalJSON(data []byte) error {
-	*i = append((*i)[:0], data...)
-	if i.IsEmpty() || i.IsNull() || i.IsString() || i.IsInt() {
-		return nil
+	err := json.Unmarshal(data, &i.data)
+	if err != nil {
+		return fmt.Errorf("unmarshal failed: %w", err)
 	}
-	return errors.New("not a valid jsonrpc id")
+	if !i.IsString() && !i.IsInt() {
+		return errors.New("not a valid jsonrpc id")
+	}
+	return nil
 }
 
-func (i Id) IsNull() bool {
-	return string(i) == "null"
-}
-
-func (i Id) IsEmpty() bool {
-	return len(i) == 0
-}
-
+// returns true if the id is a string
 func (i Id) IsString() bool {
-	return len(i) != 0 && i[0] == '"'
+	return len(i.data) != 0 && i.data[0] == '"'
 }
 
+// returns true if the id is an integer
 func (i Id) IsInt() bool {
-	_, err := strconv.ParseInt(string(i), 10, 64)
+	_, err := strconv.ParseInt(string(i.data), 10, 64)
 	return err == nil
-}
-
-func (i Id) IsValidForResponse() bool {
-	return i.IsNull() || i.IsString() || i.IsInt()
-}
-
-func (i Id) IsValidForRequest() bool {
-	return i.IsEmpty() || i.IsString() || i.IsInt()
 }
