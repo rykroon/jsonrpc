@@ -20,41 +20,32 @@ func TestRequestEncoding(t *testing.T) {
 	tests := []struct {
 		name     string
 		request  *Request
-		expected map[string]any
+		expected string
 	}{
 		{
 			"no_id_no_params",
 			NewRequest("test", nil, nil),
-			map[string]any{"jsonrpc": "2.0", "method": "test"},
+			`{"jsonrpc": "2.0", "method": "test"}`,
 		},
 		{
 			"int_id_no_params",
 			NewRequest("test", nil, NewId(123)),
-			map[string]any{"jsonrpc": "2.0", "method": "test", "id": json.Number("123")},
+			`{"jsonrpc": "2.0", "method": "test", "id": 123}`,
 		},
 		{
 			"string_id_no_params",
 			NewRequest("test", nil, NewId("hello_world")),
-			map[string]any{"jsonrpc": "2.0", "method": "test", "id": "hello_world"},
+			`{"jsonrpc": "2.0", "method": "test", "id": "hello_world"}`,
 		},
 		{
 			"no_id_positional_params",
 			NewRequest("test", positionalParams, nil),
-			map[string]any{
-				"jsonrpc": "2.0",
-				"method":  "test",
-				"params":  []any{json.Number("1"), json.Number("2"), json.Number("3")}},
+			`{"jsonrpc":"2.0", "method": "test", "params": [1, 2, 3]}`,
 		},
 		{
 			"no_id_named_params",
 			NewRequest("test", namedParams, nil),
-			map[string]any{
-				"jsonrpc": "2.0",
-				"method":  "test",
-				"params": map[string]any{
-					"one": json.Number("1"), "two": json.Number("2"), "three": json.Number("3"),
-				},
-			},
+			`{"jsonrpc": "2.0", "method": "test", "params": {"one":1, "two":2, "three":3}}`,
 		},
 	}
 
@@ -64,15 +55,22 @@ func TestRequestEncoding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var got map[string]any
+			got := make(NestedMap)
 			decoder := json.NewDecoder(bytes.NewReader(jsonBytes))
-			decoder.UseNumber()
 			err = decoder.Decode(&got)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, tc.expected) {
-				t.Errorf("Got %q, wanted %q", got, tc.expected)
+
+			decodedExpected := make(NestedMap)
+			decoder = json.NewDecoder(bytes.NewReader([]byte(tc.expected)))
+			err = decoder.Decode(&decodedExpected)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !reflect.DeepEqual(got, decodedExpected) {
+				t.Errorf("\nGot\n%q\nwanted\n%q", got, decodedExpected)
 			}
 		})
 	}

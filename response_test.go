@@ -11,12 +11,22 @@ func TestResponse(t *testing.T) {
 	tests := []struct {
 		name     string
 		response *Response
-		expected map[string]any
+		expected string
 	}{
 		{
-			"resp_null_id",
+			"err_resp_null_id",
 			NewErrorResp(nil, NewErrorTyped(0, "test", nil)),
-			map[string]any{"id": "null", "error": map[string]any{"code": json.Number("0"), "message": "test"}},
+			`{"jsonrpc": "2.0", "id": null, "error": {"code": 0, "message": "test"}}`,
+		},
+		{
+			"err_resp_with_id",
+			NewErrorResp(NewId("Hello World"), NewErrorTyped(0, "test", nil)),
+			`{"jsonrpc": "2.0", "id": "Hello World", "error": {"code": 0, "message": "test"}}`,
+		},
+		{
+			"success_resp",
+			NewSuccessResp(NewId("Hello World"), json.RawMessage([]byte("123"))),
+			`{"jsonrpc": "2.0", "id": "Hello World", "result": 123}`,
 		},
 	}
 
@@ -26,15 +36,23 @@ func TestResponse(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var got map[string]any
+
+			got := make(NestedMap)
 			decoder := json.NewDecoder(bytes.NewReader(jsonBytes))
-			decoder.UseNumber()
 			err = decoder.Decode(&got)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, tc.expected) {
-				t.Errorf("Got %q, wanted %q", got, tc.expected)
+
+			decodedExpected := make(NestedMap)
+			decoder = json.NewDecoder(bytes.NewReader([]byte(tc.expected)))
+			err = decoder.Decode(&decodedExpected)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !reflect.DeepEqual(got, decodedExpected) {
+				t.Errorf("\nGot\n%q\nwanted\n%q", got, decodedExpected)
 			}
 		})
 	}
