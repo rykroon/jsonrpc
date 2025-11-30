@@ -11,21 +11,21 @@ type JsonRpcServer interface {
 
 type HandlerFunc func(ctx context.Context, params *Params) (any, error)
 
-type jsonRpcServer struct {
+type Server struct {
 	methods map[string]HandlerFunc
 }
 
-func NewServer() JsonRpcServer {
-	return &jsonRpcServer{
+func NewServer() *Server {
+	return &Server{
 		methods: make(map[string]HandlerFunc),
 	}
 }
 
-func (s *jsonRpcServer) Register(method string, handler HandlerFunc) {
+func (s *Server) Register(method string, handler HandlerFunc) {
 	s.methods[method] = handler
 }
 
-func (s *jsonRpcServer) ServeJsonRpc(ctx context.Context, req *Request) *Response {
+func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
 	handler, exists := s.methods[req.Method]
 	if !exists {
 		return NewErrorResp(req.Id, NewErrorTyped(ErrorCodeMethodNotFound, "Method not found", nil))

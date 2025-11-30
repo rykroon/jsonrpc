@@ -12,7 +12,13 @@ func TestResponse(t *testing.T) {
 		name     string
 		response *Response
 		expected map[string]any
-	}{}
+	}{
+		{
+			"resp_null_id",
+			NewErrorResp(nil, NewErrorTyped(0, "test", nil)),
+			map[string]any{"id": "null", "error": map[string]any{"code": json.Number("0"), "message": "test"}},
+		},
+	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

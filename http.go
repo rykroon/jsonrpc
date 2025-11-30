@@ -41,8 +41,6 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Println("request: ", req.JsonRpc, req.Method, req.Id, req.Params)
-
 	// validate Request
 	if req.JsonRpc != "2.0" {
 		h.writeHttpError(w, req.Id, NewErrorTyped(ErrorCodeInvalidRequest, "jsonrpc must be 2.0", nil))
@@ -60,7 +58,7 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.writeHttpError(w, req.Id, NewErrorTyped(
 			ErrorCodeInternalError,
-			fmt.Sprintf("failed to encode jsonrpc response as json: %w", err),
+			fmt.Sprintf("failed to encode jsonrpc response as json: %s", err.Error()),
 			nil,
 		))
 	}

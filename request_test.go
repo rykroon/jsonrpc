@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestRequest(t *testing.T) {
+func TestRequestEncoding(t *testing.T) {
 	positionalParams, err := NewParams([]any{1.0, 2.0, 3.0})
 	if err != nil {
 		t.Fatal(err)
