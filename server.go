@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 )
 
 type JsonRpcServer interface {
@@ -28,7 +29,8 @@ func (s *Server) Register(method string, handler HandlerFunc) {
 func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
 	handler, exists := s.methods[req.Method]
 	if !exists {
-		return NewErrorResp(req.Id, NewErrorTyped(ErrorCodeMethodNotFound, "Method not found", nil))
+		err := NewError(ErrorCodeMethodNotFound, "Method not found", nil).(*Error)
+		return NewErrorResp(req.Id, err)
 	}
 
 	if req.IsNotification() {
@@ -43,13 +45,16 @@ func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
 		case *Error:
 			return NewErrorResp(req.Id, e)
 		default:
-			return NewErrorResp(req.Id, NewErrorTyped(ErrorCodeInternalError, err.Error(), nil))
+			err := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
+			return NewErrorResp(req.Id, err)
 		}
 	}
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		return NewErrorResp(req.Id, NewErrorTyped(ErrorCodeInternalError, err.Error(), nil))
+		err = fmt.Errorf("failed to marshal result: %w", err)
+		jsonrpcErr := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
+		return NewErrorResp(req.Id, jsonrpcErr)
 	}
 
 	return NewSuccessResp(req.Id, data)

@@ -16,14 +16,9 @@ type Error struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-// returns a new concrete json-rpc error.
-func NewErrorTyped(code int, message string, data any) *Error {
-	return &Error{code, message, data}
-}
-
 // returns a new error
 func NewError(code int, message string, data any) error {
-	return NewErrorTyped(code, message, data)
+	return &Error{code, message, data}
 }
 
 func (e Error) Error() string {

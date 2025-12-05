@@ -1,6 +1,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,22 +29,26 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// add logic for batched requests.
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	var req *Request
 	if err := decoder.Decode(&req); err != nil {
 		switch err.(type) {
 		case *json.SyntaxError:
-			h.writeHttpError(w, nil, NewErrorTyped(ErrorCodeParseError, err.Error(), nil))
+			err := NewError(ErrorCodeParseError, err.Error(), nil).(*Error)
+			h.writeResponse(w, NewErrorResp(nil, err))
 		default:
-			h.writeHttpError(w, nil, NewErrorTyped(ErrorCodeInvalidRequest, err.Error(), nil))
+			err := NewError(ErrorCodeInvalidRequest, err.Error(), nil).(*Error)
+			h.writeResponse(w, NewErrorResp(nil, err))
 		}
 		return
 	}
 
 	// validate Request
 	if req.JsonRpc != "2.0" {
-		h.writeHttpError(w, req.Id, NewErrorTyped(ErrorCodeInvalidRequest, "jsonrpc must be 2.0", nil))
+		err := NewError(ErrorCodeInvalidRequest, "jsonrpc must be 2.0", nil).(*Error)
+		h.writeResponse(w, NewErrorResp(req.Id, err))
 		return
 	}
 
@@ -56,16 +61,31 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		h.writeHttpError(w, req.Id, NewErrorTyped(
+		err := NewError(
 			ErrorCodeInternalError,
 			fmt.Sprintf("failed to encode jsonrpc response as json: %s", err.Error()),
 			nil,
-		))
+		).(*Error)
+		h.writeResponse(w, NewErrorResp(req.Id, err))
 	}
 }
 
-func (h *HttpHandler) writeHttpError(w http.ResponseWriter, id *Id, err *Error) {
-	resp := NewErrorResp(id, err)
+func (h *HttpHandler) writeResponse(w http.ResponseWriter, resp *Response) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func NewHttpRequest(url string, req *Request) (*http.Request, error) {
+	b, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal jsonrpc request: %w", err)
+	}
+
+	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create http request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	return httpReq, nil
 }
