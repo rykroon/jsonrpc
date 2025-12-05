@@ -20,6 +20,6 @@ func NewNotification(method string, params *Params) *Request {
 	return NewRequest(method, params, nil)
 }
 
-func (r Request) IsNotification() bool {
+func (r *Request) IsNotification() bool {
 	return r.Id == nil
 }
