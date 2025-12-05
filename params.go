@@ -17,7 +17,7 @@ func NewParams(v any) (*Params, error) {
 	}
 
 	params := &Params{data: data}
-	if !params.IsNamed() && !params.IsPositional() {
+	if !params.ByName() && !params.ByPosition() {
 		return nil, errors.New("invalid params")
 	}
 
@@ -28,11 +28,11 @@ func (p Params) String() string {
 	return string(p.data)
 }
 
-func (p Params) IsPositional() bool {
+func (p Params) ByPosition() bool {
 	return len(p.data) != 0 && p.data[0] == '['
 }
 
-func (p Params) IsNamed() bool {
+func (p Params) ByName() bool {
 	return len(p.data) != 0 && p.data[0] == '{'
 }
 
@@ -45,7 +45,7 @@ func (p *Params) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal json: %w", err)
 	}
-	if p.IsNamed() || p.IsPositional() {
+	if p.ByName() || p.ByPosition() {
 		return nil
 	}
 	return errors.New("not a valid params type")
@@ -57,7 +57,7 @@ type Positional interface {
 
 // Decode the params into a value
 func (p *Params) DecodeInto(v any) error {
-	if p.IsPositional() {
+	if p.ByPosition() {
 		if positional, ok := v.(Positional); ok {
 			pointers := positional.GetParamPointers()
 			return json.Unmarshal(p.data, &pointers)
