@@ -8,6 +8,7 @@ import (
 )
 
 func TestResponse(t *testing.T) {
+	err := NewError(0, "test", nil).(*Error)
 	tests := []struct {
 		name     string
 		response *Response
@@ -15,12 +16,12 @@ func TestResponse(t *testing.T) {
 	}{
 		{
 			"err_resp_null_id",
-			NewErrorResp(nil, NewErrorTyped(0, "test", nil)),
+			NewErrorResp(nil, err),
 			`{"jsonrpc": "2.0", "id": null, "error": {"code": 0, "message": "test"}}`,
 		},
 		{
 			"err_resp_with_id",
-			NewErrorResp(NewId("Hello World"), NewErrorTyped(0, "test", nil)),
+			NewErrorResp(NewId("Hello World"), err),
 			`{"jsonrpc": "2.0", "id": "Hello World", "error": {"code": 0, "message": "test"}}`,
 		},
 		{
