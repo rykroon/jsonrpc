@@ -3,50 +3,44 @@ package jsonrpc
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strconv"
+
+	"golang.org/x/exp/constraints"
 )
+
+var ErrInvalidId = errors.New("id must be a string or integer")
 
 // A JSON-RPC Id
 type Id struct {
-	data json.RawMessage
+	raw json.RawMessage
 }
 
 // Create a new JSON-RPC Id
-func NewId[T string | int](v T) *Id {
-	data, err := json.Marshal(v)
-	if err != nil {
-		panic(err) // this should never happen
-	}
-	return &Id{data: data}
+func NewId[T string | constraints.Integer](v T) *Id {
+	data, _ := json.Marshal(v)
+	id := &Id{}
+	_ = id.setRaw(data)
+	return id
 }
 
 func (id Id) String() string {
-	return string(id.data)
+	return string(id.raw)
 }
 
 func (id Id) MarshalJSON() ([]byte, error) {
-	return json.Marshal(id.data)
+	return json.Marshal(id.raw)
 }
 
 func (i *Id) UnmarshalJSON(data []byte) error {
-	err := json.Unmarshal(data, &i.data)
-	if err != nil {
-		return fmt.Errorf("unmarshal failed: %w", err)
-	}
-	if !i.IsString() && !i.IsInt() {
-		return errors.New("not a valid jsonrpc id")
+	if err := i.setRaw(data); err != nil {
+		return err
 	}
 	return nil
 }
 
-// returns true if the id is a string
-func (i Id) IsString() bool {
-	return len(i.data) != 0 && i.data[0] == '"'
-}
-
-// returns true if the id is an integer
-func (i Id) IsInt() bool {
-	_, err := strconv.ParseInt(string(i.data), 10, 64)
-	return err == nil
+func (i *Id) setRaw(r json.RawMessage) error {
+	if !isString(r) && !isInt(r) {
+		return ErrInvalidId
+	}
+	i.raw = r
+	return nil
 }
