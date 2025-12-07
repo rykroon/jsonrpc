@@ -1,28 +1,40 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"encoding/json"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestResponse(t *testing.T) {
 	err := NewError(0, "test", nil).(*Error)
+	errWithData := NewError(0, "test", map[string]any{"foo": "bar"}).(*Error)
+
 	tests := []struct {
 		name     string
 		response *Response
 		expected string
 	}{
 		{
-			"err_resp_null_id",
+			"err_resp_with_null_id",
 			NewErrorResp(nil, err),
 			`{"jsonrpc": "2.0", "id": null, "error": {"code": 0, "message": "test"}}`,
 		},
 		{
-			"err_resp_with_id",
+			"err_resp_with_string_id",
 			NewErrorResp(NewId("Hello World"), err),
 			`{"jsonrpc": "2.0", "id": "Hello World", "error": {"code": 0, "message": "test"}}`,
+		},
+		{
+			"err_resp_with_int_id",
+			NewErrorResp(NewId(123), err),
+			`{"jsonrpc": "2.0", "id": 123, "error": {"code": 0, "message": "test"}}`,
+		},
+		{
+			"error_with_data",
+			NewErrorResp(NewId(123), errWithData),
+			`{"jsonrpc": "2.0", "id": 123, "error": {"code": 0, "message": "test", "data": {"foo": "bar"}}}`,
 		},
 		{
 			"success_resp",
@@ -33,28 +45,12 @@ func TestResponse(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			jsonBytes, err := json.Marshal(tc.response)
+			b, err := json.Marshal(tc.response)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			got := make(NestedMap)
-			decoder := json.NewDecoder(bytes.NewReader(jsonBytes))
-			err = decoder.Decode(&got)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			decodedExpected := make(NestedMap)
-			decoder = json.NewDecoder(bytes.NewReader([]byte(tc.expected)))
-			err = decoder.Decode(&decodedExpected)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if !reflect.DeepEqual(got, decodedExpected) {
-				t.Errorf("\nGot\n%q\nwanted\n%q", got, decodedExpected)
-			}
+			require.JSONEq(t, tc.expected, string(b))
 		})
 	}
 }

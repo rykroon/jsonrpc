@@ -1,10 +1,10 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"encoding/json"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRequestEncoding(t *testing.T) {
@@ -51,27 +51,11 @@ func TestRequestEncoding(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			jsonBytes, err := json.Marshal(tc.request)
+			b, err := json.Marshal(tc.request)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := make(NestedMap)
-			decoder := json.NewDecoder(bytes.NewReader(jsonBytes))
-			err = decoder.Decode(&got)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			decodedExpected := make(NestedMap)
-			decoder = json.NewDecoder(bytes.NewReader([]byte(tc.expected)))
-			err = decoder.Decode(&decodedExpected)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if !reflect.DeepEqual(got, decodedExpected) {
-				t.Errorf("\nGot\n%q\nwanted\n%q", got, decodedExpected)
-			}
+			require.JSONEq(t, tc.expected, string(b))
 		})
 	}
 }
