@@ -7,8 +7,6 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
-var ErrInvalidId = errors.New("id must be a string or integer")
-
 // A JSON-RPC Id
 type Id struct {
 	raw json.RawMessage
@@ -17,9 +15,7 @@ type Id struct {
 // Create a new JSON-RPC Id
 func NewId[T string | constraints.Integer](v T) *Id {
 	data, _ := json.Marshal(v)
-	id := &Id{}
-	_ = id.setRaw(data)
-	return id
+	return &Id{data}
 }
 
 func (id Id) String() string {
@@ -31,16 +27,9 @@ func (id Id) MarshalJSON() ([]byte, error) {
 }
 
 func (i *Id) UnmarshalJSON(data []byte) error {
-	if err := i.setRaw(data); err != nil {
-		return err
+	if !isString(data) && !isInt(data) {
+		return errors.New("not a valid jsonrpc id")
 	}
-	return nil
-}
-
-func (i *Id) setRaw(r json.RawMessage) error {
-	if !isString(r) && !isInt(r) {
-		return ErrInvalidId
-	}
-	i.raw = r
+	i.raw = data
 	return nil
 }

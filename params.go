@@ -7,7 +7,7 @@ import (
 )
 
 type Params struct {
-	data json.RawMessage
+	raw json.RawMessage
 }
 
 func NewParams(v any) (*Params, error) {
@@ -16,39 +16,35 @@ func NewParams(v any) (*Params, error) {
 		return nil, fmt.Errorf("failed to marshal json: %w", err)
 	}
 
-	params := &Params{data: data}
-	if !params.ByName() && !params.ByPosition() {
+	if !isArray(data) && !isObject(data) {
 		return nil, errors.New("invalid params")
 	}
 
-	return params, nil
+	return &Params{data}, nil
 }
 
 func (p Params) String() string {
-	return string(p.data)
+	return string(p.raw)
 }
 
 func (p Params) ByPosition() bool {
-	return len(p.data) != 0 && p.data[0] == '['
+	return isArray(p.raw)
 }
 
 func (p Params) ByName() bool {
-	return len(p.data) != 0 && p.data[0] == '{'
+	return isObject(p.raw)
 }
 
 func (p *Params) MarshalJSON() ([]byte, error) {
-	return json.Marshal(p.data)
+	return json.Marshal(p.raw)
 }
 
 func (p *Params) UnmarshalJSON(data []byte) error {
-	err := json.Unmarshal(data, &p.data)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal json: %w", err)
+	if !isObject(data) && !isArray(data) {
+		return errors.New("invalid params")
 	}
-	if p.ByName() || p.ByPosition() {
-		return nil
-	}
-	return errors.New("not a valid params type")
+	p.raw = data
+	return nil
 }
 
 type Positional interface {
@@ -60,9 +56,9 @@ func (p *Params) DecodeInto(v any) error {
 	if p.ByPosition() {
 		if positional, ok := v.(Positional); ok {
 			pointers := positional.GetParamPointers()
-			return json.Unmarshal(p.data, &pointers)
+			return json.Unmarshal(p.raw, &pointers)
 		}
 		return fmt.Errorf("type %T does not support positional params", v)
 	}
-	return json.Unmarshal(p.data, v)
+	return json.Unmarshal(p.raw, v)
 }
