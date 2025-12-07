@@ -45,12 +45,12 @@ func TestResponse(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			b, err := json.Marshal(tc.response)
+			actual, err := json.Marshal(tc.response)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			require.JSONEq(t, tc.expected, string(b))
+			require.JSONEq(t, tc.expected, string(actual))
 		})
 	}
 }
