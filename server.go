@@ -11,12 +11,12 @@ type JsonRpcServer interface {
 }
 
 type MethodHandler interface {
-	HandleMethod(context.Context, Params) (any, error)
+	HandleMethod(context.Context, *Params) (any, error)
 }
 
-type HandlerFunc func(context.Context, Params) (any, error)
+type HandlerFunc func(context.Context, *Params) (any, error)
 
-func (f HandlerFunc) HandleMethod(c context.Context, p Params) (any, error) {
+func (f HandlerFunc) HandleMethod(c context.Context, p *Params) (any, error) {
 	return f(c, p)
 }
 
@@ -34,7 +34,7 @@ func (s *Server) Register(method string, handler MethodHandler) {
 	s.methods[method] = handler
 }
 
-func (s *Server) RegisterFunc(method string, handler func(context.Context, Params) (any, error)) {
+func (s *Server) RegisterFunc(method string, handler func(context.Context, *Params) (any, error)) {
 	s.Register(method, HandlerFunc(handler))
 }
 
