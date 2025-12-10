@@ -16,11 +16,12 @@ func NewParams(v any) (*Params, error) {
 		return nil, fmt.Errorf("failed to marshal json: %w", err)
 	}
 
-	if !isArray(data) && !isObject(data) {
-		return nil, errors.New("invalid params")
+	p := &Params{}
+	err = p.UnmarshalJSON(data)
+	if err != nil {
+		return nil, err
 	}
-
-	return &Params{data}, nil
+	return p, nil
 }
 
 func (p Params) String() string {
@@ -35,15 +36,15 @@ func (p Params) ByName() bool {
 	return isObject(p.raw)
 }
 
-func (p *Params) MarshalJSON() ([]byte, error) {
+func (p Params) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p.raw)
 }
 
 func (p *Params) UnmarshalJSON(data []byte) error {
 	if !isObject(data) && !isArray(data) {
-		return errors.New("invalid params")
+		return errors.New("params must be an object or an array")
 	}
-	p.raw = data
+	p.raw = append(make([]byte, 0, len(data)), data...)
 	return nil
 }
 

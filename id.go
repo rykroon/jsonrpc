@@ -22,14 +22,18 @@ func (id Id) String() string {
 	return string(id.raw)
 }
 
+func (id *Id) IsZero() bool {
+	return id == nil || isEmpty(id.raw) || isNull(id.raw)
+}
+
 func (id Id) MarshalJSON() ([]byte, error) {
 	return json.Marshal(id.raw)
 }
 
 func (i *Id) UnmarshalJSON(data []byte) error {
 	if !isString(data) && !isInt(data) {
-		return errors.New("not a valid jsonrpc id")
+		return errors.New("id must be a string or an integer")
 	}
-	i.raw = data
+	i.raw = append(make([]byte, 0, len(data)), data...)
 	return nil
 }
