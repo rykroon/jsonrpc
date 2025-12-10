@@ -8,6 +8,7 @@ const (
 	ErrorCodeMethodNotFound = -32601
 	ErrorCodeInvalidParams  = -32602
 	ErrorCodeInternalError  = -32603
+	ErrorCodeServerError    = -32000
 )
 
 type Error struct {

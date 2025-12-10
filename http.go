@@ -34,10 +34,12 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	var req *Request
 	if err := decoder.Decode(&req); err != nil {
-		switch err.(type) {
+		switch concreteErr := err.(type) {
 		case *json.SyntaxError:
 			err := NewError(ErrorCodeParseError, err.Error(), nil).(*Error)
 			h.writeResponse(w, NewErrorResp(nil, err))
+		case *Error:
+			h.writeResponse(w, NewErrorResp(nil, concreteErr))
 		default:
 			err := NewError(ErrorCodeInvalidRequest, err.Error(), nil).(*Error)
 			h.writeResponse(w, NewErrorResp(nil, err))
@@ -78,7 +80,7 @@ func (h *HttpHandler) writeResponse(w http.ResponseWriter, resp *Response) {
 func NewHttpRequest(url string, req *Request) (*http.Request, error) {
 	b, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal jsonrpc request: %w", err)
+		return nil, fmt.Errorf("failed to marshal json: %w", err)
 	}
 
 	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
