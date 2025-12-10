@@ -25,6 +25,10 @@ func isEmpty(r json.RawMessage) bool {
 	return len(r) == 0
 }
 
+func isNull(r json.RawMessage) bool {
+	return string(r) == "null"
+}
+
 func isObject(r json.RawMessage) bool {
 	return len(r) != 0 && r[0] == '{' && r[len(r)-1] == '}'
 }
