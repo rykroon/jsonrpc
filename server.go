@@ -4,27 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 )
 
 type JsonRpcServer interface {
 	ServeJsonRpc(ctx context.Context, req *Request) *Response
 }
 
-type HandlerFunc func(ctx context.Context, params *Params) (any, error)
+type MethodHandler interface {
+	HandleMethod(context.Context, Params) (any, error)
+}
+
+type HandlerFunc func(context.Context, Params) (any, error)
+
+func (f HandlerFunc) HandleMethod(c context.Context, p Params) (any, error) {
+	return f(c, p)
+}
 
 type Server struct {
-	methods map[string]HandlerFunc
+	methods map[string]MethodHandler
 }
 
 func NewServer() *Server {
 	return &Server{
-		methods: make(map[string]HandlerFunc),
+		methods: make(map[string]MethodHandler),
 	}
 }
 
-func (s *Server) Register(method string, handler HandlerFunc) {
+func (s *Server) Register(method string, handler MethodHandler) {
 	s.methods[method] = handler
+}
+
+func (s *Server) RegisterFunc(method string, handler func(context.Context, Params) (any, error)) {
+	s.Register(method, HandlerFunc(handler))
 }
 
 func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
@@ -36,11 +47,11 @@ func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
 
 	if req.IsNotification() {
 		// consider a way to check for invalid params before running the notification.
-		go handler(ctx, req.Params)
+		go handler.HandleMethod(ctx, req.Params)
 		return nil
 	}
 
-	result, err := handler(ctx, req.Params)
+	result, err := handler.HandleMethod(ctx, req.Params)
 	if err != nil {
 		var e *Error
 		if ok := errors.As(err, e); ok {
@@ -53,9 +64,8 @@ func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		err = fmt.Errorf("failed to marshal result: %w", err)
-		jsonrpcErr := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
-		return NewErrorResp(req.Id, jsonrpcErr)
+		jsonRpcErr := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
+		return NewErrorResp(req.Id, jsonRpcErr)
 	}
 
 	return NewSuccessResp(req.Id, data)
