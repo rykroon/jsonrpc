@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -41,12 +42,12 @@ func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
 
 	result, err := handler(ctx, req.Params)
 	if err != nil {
-		switch e := err.(type) {
-		case *Error:
+		var e *Error
+		if ok := errors.As(err, e); ok {
 			return NewErrorResp(req.Id, e)
-		default:
-			err := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
-			return NewErrorResp(req.Id, err)
+		} else {
+			e := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
+			return NewErrorResp(req.Id, e)
 		}
 	}
 
