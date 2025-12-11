@@ -37,12 +37,12 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch concreteErr := err.(type) {
 		case *json.SyntaxError:
 			err := NewError(ErrorCodeParseError, err.Error(), nil).(*Error)
-			h.writeResponse(w, NewErrorResp(nil, err))
+			h.writeResponse(w, NewErrorResp(NullId(), err))
 		case *Error:
-			h.writeResponse(w, NewErrorResp(nil, concreteErr))
+			h.writeResponse(w, NewErrorResp(NullId(), concreteErr))
 		default:
 			err := NewError(ErrorCodeInvalidRequest, err.Error(), nil).(*Error)
-			h.writeResponse(w, NewErrorResp(nil, err))
+			h.writeResponse(w, NewErrorResp(NullId(), err))
 		}
 		return
 	}

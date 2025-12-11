@@ -4,10 +4,10 @@ type Request struct {
 	JsonRpc string `json:"jsonrpc"`
 	Method  string `json:"method"`
 	Params  Params `json:"params,omitzero"`
-	Id      *Id    `json:"id,omitzero"`
+	Id      Id     `json:"id,omitzero"`
 }
 
-func NewRequest(method string, params *Params, id *Id) *Request {
+func NewRequest(method string, params *Params, id Id) *Request {
 	if params == nil {
 		params = &Params{}
 	}
@@ -20,9 +20,9 @@ func NewRequest(method string, params *Params, id *Id) *Request {
 }
 
 func NewNotification(method string, params *Params) *Request {
-	return NewRequest(method, params, nil)
+	return NewRequest(method, params, Id{})
 }
 
 func (r *Request) IsNotification() bool {
-	return r.Id.IsZero()
+	return r.Id.IsAbsent()
 }

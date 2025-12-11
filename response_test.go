@@ -18,7 +18,7 @@ func TestResponseEncoding(t *testing.T) {
 	}{
 		{
 			"err_resp_with_null_id",
-			NewErrorResp(nil, err),
+			NewErrorResp(NullId(), err),
 			`{"jsonrpc": "2.0", "id": null, "error": {"code": 0, "message": "test"}}`,
 		},
 		{
@@ -67,7 +67,7 @@ func TestResponseDecoding(t *testing.T) {
 		{
 			"err_resp_with_null_id",
 			`{"jsonrpc": "2.0", "id": null, "error": {"code": 0, "message": "test"}}`,
-			NewErrorResp(nil, err),
+			NewErrorResp(NullId(), err),
 		},
 		{
 			"err_resp_with_string_id",

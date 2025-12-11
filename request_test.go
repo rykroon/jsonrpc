@@ -24,7 +24,7 @@ func TestRequestEncoding(t *testing.T) {
 	}{
 		{
 			"no_id_no_params",
-			NewRequest("test", nil, nil),
+			NewNotification("test", nil),
 			`{"jsonrpc": "2.0", "method": "test"}`,
 		},
 		{
@@ -39,12 +39,12 @@ func TestRequestEncoding(t *testing.T) {
 		},
 		{
 			"no_id_positional_params",
-			NewRequest("test", positionalParams, nil),
+			NewNotification("test", positionalParams),
 			`{"jsonrpc":"2.0", "method": "test", "params": [1, 2, 3]}`,
 		},
 		{
 			"no_id_named_params",
-			NewRequest("test", namedParams, nil),
+			NewNotification("test", namedParams),
 			`{"jsonrpc": "2.0", "method": "test", "params": {"one": 1, "two": 2, "three": 3}}`,
 		},
 	}
@@ -78,7 +78,7 @@ func TestRequestDecoding(t *testing.T) {
 		{
 			"no_id_no_params",
 			`{"jsonrpc": "2.0", "method": "test"}`,
-			NewRequest("test", nil, nil),
+			NewNotification("test", nil),
 		},
 		{
 			"int_id_no_params",
@@ -93,12 +93,12 @@ func TestRequestDecoding(t *testing.T) {
 		{
 			"no_id_positional_params",
 			`{"jsonrpc":"2.0", "method": "test", "params": [1,2,3]}`,
-			NewRequest("test", positionalParams, nil),
+			NewNotification("test", positionalParams),
 		},
 		{
 			"no_id_named_params",
 			`{"jsonrpc": "2.0", "method": "test", "params": {"one":1, "two":2, "three":3}}`,
-			NewRequest("test", namedParams, nil),
+			NewNotification("test", namedParams),
 		},
 	}
 

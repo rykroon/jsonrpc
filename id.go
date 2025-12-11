@@ -13,17 +13,17 @@ type Id struct {
 }
 
 // Create a new JSON-RPC Id
-func NewId[T string | constraints.Integer](v T) *Id {
+func NewId[T string | constraints.Integer](v T) Id {
 	data, _ := json.Marshal(v)
-	return &Id{data}
+	return Id{data}
+}
+
+func NullId() Id {
+	return Id{[]byte("null")}
 }
 
 func (id Id) String() string {
 	return string(id.raw)
-}
-
-func (id *Id) IsZero() bool {
-	return id == nil || isAbsent(id.raw) || isNull(id.raw)
 }
 
 func (id Id) MarshalJSON() ([]byte, error) {
@@ -31,9 +31,13 @@ func (id Id) MarshalJSON() ([]byte, error) {
 }
 
 func (i *Id) UnmarshalJSON(data []byte) error {
-	if !isString(data) && !isInt(data) {
+	if !isNull(data) && !isString(data) && !isInt(data) {
 		return errors.New("id must be a string or an integer")
 	}
 	i.raw = append(make([]byte, 0, len(data)), data...)
 	return nil
+}
+
+func (i Id) IsAbsent() bool {
+	return isAbsent(i.raw)
 }
