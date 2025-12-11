@@ -28,14 +28,6 @@ func (p Params) String() string {
 	return string(p.raw)
 }
 
-func (p Params) ByPosition() bool {
-	return isArray(p.raw)
-}
-
-func (p Params) ByName() bool {
-	return isObject(p.raw)
-}
-
 func (p Params) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p.raw)
 }
@@ -48,18 +40,35 @@ func (p *Params) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (p Params) IsAbsent() bool {
+	return isAbsent(p.raw)
+}
+
+func (p Params) ByPosition() bool {
+	return isArray(p.raw)
+}
+
+func (p Params) ByName() bool {
+	return isObject(p.raw)
+}
+
 type Positional interface {
 	GetParamPointers() []any
 }
 
 // Decode the params into a value
-func (p *Params) DecodeInto(v any) error {
-	if p.ByPosition() {
-		if positional, ok := v.(Positional); ok {
-			pointers := positional.GetParamPointers()
-			return json.Unmarshal(p.raw, &pointers)
-		}
-		return fmt.Errorf("type %T does not support positional params", v)
+func (p Params) DecodeInto(v any) error {
+	if p.IsAbsent() {
+		return errors.New("no params")
 	}
 	return json.Unmarshal(p.raw, v)
+}
+
+func (p Params) DecodePositional(array ...any) error {
+	if p.IsAbsent() {
+		return errors.New("no params")
+	} else if !p.ByPosition() {
+		return errors.New("params aren not positional")
+	}
+	return json.Unmarshal(p.raw, &array)
 }

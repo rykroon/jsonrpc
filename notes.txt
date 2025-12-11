@@ -1,0 +1,13 @@
+
+Id and Params are both similar and different in a couple of ways
+
+Both can be of a range of json types.
+- An id can be an integer or a string (in some cases null)
+- params can be an array, an object, or omitted
+
+Both are different in the sense that an ID is part of a request AND a response,
+while params are only for requests.
+
+With an ID, it can only be int, string, or omitted from a request,
+for responses, it can an int, string, or null.
+

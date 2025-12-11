@@ -32,7 +32,7 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// add logic for batched requests.
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	var req *Request
+	req := &Request{}
 	if err := decoder.Decode(&req); err != nil {
 		switch concreteErr := err.(type) {
 		case *json.SyntaxError:

@@ -104,7 +104,7 @@ func TestRequestDecoding(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var actual *Request
+			actual := &Request{}
 			err := json.Unmarshal([]byte(tc.jsonString), &actual)
 			if err != nil {
 				t.Fatal(err)
@@ -113,7 +113,7 @@ func TestRequestDecoding(t *testing.T) {
 			require.Equal(t, tc.expected.JsonRpc, actual.JsonRpc)
 			require.Equal(t, tc.expected.Method, actual.Method)
 			require.Equal(t, tc.expected.Id, actual.Id)
-			if tc.expected.Params == nil {
+			if tc.expected.Params.IsAbsent() {
 				require.Equal(t, tc.expected.Params, actual.Params)
 			} else {
 				require.JSONEq(t, tc.expected.Params.String(), actual.Params.String())

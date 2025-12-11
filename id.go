@@ -23,7 +23,7 @@ func (id Id) String() string {
 }
 
 func (id *Id) IsZero() bool {
-	return id == nil || isEmpty(id.raw) || isNull(id.raw)
+	return id == nil || isAbsent(id.raw) || isNull(id.raw)
 }
 
 func (id Id) MarshalJSON() ([]byte, error) {

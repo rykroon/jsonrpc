@@ -12,7 +12,7 @@ func isInt(r json.RawMessage) bool {
 	if isString(r) {
 		return false
 	}
-	var n json.Number
+	n := json.Number("")
 	err := json.Unmarshal(r, &n)
 	if err != nil {
 		return false
@@ -21,7 +21,7 @@ func isInt(r json.RawMessage) bool {
 	return err == nil
 }
 
-func isEmpty(r json.RawMessage) bool {
+func isAbsent(r json.RawMessage) bool {
 	return len(r) == 0
 }
 
