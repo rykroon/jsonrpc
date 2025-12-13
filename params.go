@@ -8,7 +8,7 @@ import (
 )
 
 type Params struct {
-	raw json.RawMessage
+	value value
 }
 
 func NewParams(v any) (*Params, error) {
@@ -26,34 +26,35 @@ func NewParams(v any) (*Params, error) {
 }
 
 func (p Params) String() string {
-	return string(p.raw)
+	return p.value.String()
 }
 
 func (p Params) MarshalJSON() ([]byte, error) {
-	return json.Marshal(p.raw)
+	return json.Marshal(p.value)
 }
 
 func (p *Params) UnmarshalJSON(data []byte) error {
-	if !isObject(data) && !isArray(data) {
+	temp := value(data)
+	if temp.Kind() != '{' && temp.Kind() != '[' {
 		return &json.UnmarshalTypeError{
-			Value: tokenName(data[0]),
+			Value: temp.Kind().String(),
 			Type:  reflect.TypeOf(p).Elem(),
 		}
 	}
-	p.raw = append(make([]byte, 0, len(data)), data...)
+	p.value = temp.Clone()
 	return nil
 }
 
 func (p Params) IsAbsent() bool {
-	return isAbsent(p.raw)
+	return len(p.value) == 0
 }
 
 func (p Params) ByPosition() bool {
-	return isArray(p.raw)
+	return p.value.Kind() == '['
 }
 
 func (p Params) ByName() bool {
-	return isObject(p.raw)
+	return p.value.Kind() == '{'
 }
 
 // Decode the params into a value
@@ -61,5 +62,5 @@ func (p Params) Decode(v any) error {
 	if p.IsAbsent() {
 		return errors.New("no params")
 	}
-	return json.Unmarshal(p.raw, v)
+	return json.Unmarshal(p.value, v)
 }

@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 
 	"golang.org/x/exp/constraints"
@@ -9,7 +10,7 @@ import (
 
 // A JSON-RPC Id
 type Id struct {
-	raw json.RawMessage
+	value value
 }
 
 // Create a new JSON-RPC Id
@@ -23,27 +24,31 @@ func NullId() Id {
 }
 
 func (id Id) String() string {
-	return string(id.raw)
+	return id.value.String()
 }
 
 func (id Id) MarshalJSON() ([]byte, error) {
-	return json.Marshal(id.raw)
+	return json.Marshal(id.value)
 }
 
 func (i *Id) UnmarshalJSON(data []byte) error {
-	if !isNull(data) && !isString(data) && !isInt(data) {
+	temp := value(data)
+	if temp.Kind() != 'n' && temp.Kind() != '"' && temp.Kind() != '0' {
 		return &json.UnmarshalTypeError{
-			Value: tokenName(data[0]),
+			Value: temp.Kind().String(),
 			Type:  reflect.TypeOf(i).Elem(),
 		}
 	}
-	i.raw = append(make([]byte, 0, len(data)), data...)
+	i.value = temp.Clone()
 	return nil
 }
 
 func (i Id) AsString() (string, error) {
+	if i.value.Kind() != '"' {
+		return "", errors.New("not a string")
+	}
 	s := ""
-	err := json.Unmarshal(i.raw, &s)
+	err := json.Unmarshal(i.value, &s)
 	if err != nil {
 		return "", err
 	}
@@ -51,8 +56,11 @@ func (i Id) AsString() (string, error) {
 }
 
 func (i Id) AsInt64() (int64, error) {
+	if i.value.Kind() != '0' {
+		return 0, errors.New("not an int")
+	}
 	n := json.Number("")
-	err := json.Unmarshal(i.raw, &n)
+	err := json.Unmarshal(i.value, &n)
 	if err != nil {
 		return 0, err
 	}
@@ -61,8 +69,4 @@ func (i Id) AsInt64() (int64, error) {
 		return 0, err
 	}
 	return integer, nil
-}
-
-func (i Id) IsAbsent() bool {
-	return isAbsent(i.raw)
 }
