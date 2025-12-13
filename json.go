@@ -5,7 +5,7 @@ import (
 )
 
 func isString(r json.RawMessage) bool {
-	return len(r) != 0 && r[0] == '"' && r[len(r)-1] == '"'
+	return len(r) != 0 && r[0] == '"'
 }
 
 func isInt(r json.RawMessage) bool {
@@ -30,9 +30,26 @@ func isNull(r json.RawMessage) bool {
 }
 
 func isObject(r json.RawMessage) bool {
-	return len(r) != 0 && r[0] == '{' && r[len(r)-1] == '}'
+	return len(r) != 0 && r[0] == '{'
 }
 
 func isArray(r json.RawMessage) bool {
-	return len(r) != 0 && r[0] == '[' && r[len(r)-1] == ']'
+	return len(r) != 0 && r[0] == '['
+}
+
+func tokenName(b byte) string {
+	switch b {
+	case '"':
+		return "string"
+	case 't', 'f':
+		return "bool"
+	case 'n':
+		return "null"
+	case '{':
+		return "object"
+	case '[':
+		return "array"
+	default:
+		return "number"
+	}
 }

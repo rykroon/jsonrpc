@@ -2,7 +2,7 @@ package jsonrpc
 
 import (
 	"encoding/json"
-	"errors"
+	"reflect"
 
 	"golang.org/x/exp/constraints"
 )
@@ -32,10 +32,35 @@ func (id Id) MarshalJSON() ([]byte, error) {
 
 func (i *Id) UnmarshalJSON(data []byte) error {
 	if !isNull(data) && !isString(data) && !isInt(data) {
-		return errors.New("id must be a string or an integer")
+		return &json.UnmarshalTypeError{
+			Value: tokenName(data[0]),
+			Type:  reflect.TypeOf(i).Elem(),
+		}
 	}
 	i.raw = append(make([]byte, 0, len(data)), data...)
 	return nil
+}
+
+func (i Id) AsString() (string, error) {
+	s := ""
+	err := json.Unmarshal(i.raw, &s)
+	if err != nil {
+		return "", err
+	}
+	return s, nil
+}
+
+func (i Id) AsInt64() (int64, error) {
+	n := json.Number("")
+	err := json.Unmarshal(i.raw, &n)
+	if err != nil {
+		return 0, err
+	}
+	integer, err := n.Int64()
+	if err != nil {
+		return 0, err
+	}
+	return integer, nil
 }
 
 func (i Id) IsAbsent() bool {

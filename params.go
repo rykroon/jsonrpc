@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 )
 
 type Params struct {
@@ -34,7 +35,10 @@ func (p Params) MarshalJSON() ([]byte, error) {
 
 func (p *Params) UnmarshalJSON(data []byte) error {
 	if !isObject(data) && !isArray(data) {
-		return errors.New("params must be an object or an array")
+		return &json.UnmarshalTypeError{
+			Value: tokenName(data[0]),
+			Type:  reflect.TypeOf(p).Elem(),
+		}
 	}
 	p.raw = append(make([]byte, 0, len(data)), data...)
 	return nil
@@ -52,23 +56,10 @@ func (p Params) ByName() bool {
 	return isObject(p.raw)
 }
 
-type Positional interface {
-	GetParamPointers() []any
-}
-
 // Decode the params into a value
-func (p Params) DecodeInto(v any) error {
+func (p Params) Decode(v any) error {
 	if p.IsAbsent() {
 		return errors.New("no params")
 	}
 	return json.Unmarshal(p.raw, v)
-}
-
-func (p Params) DecodePositional(array ...any) error {
-	if p.IsAbsent() {
-		return errors.New("no params")
-	} else if !p.ByPosition() {
-		return errors.New("params aren not positional")
-	}
-	return json.Unmarshal(p.raw, &array)
 }

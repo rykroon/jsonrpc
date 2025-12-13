@@ -26,3 +26,12 @@ func NewNotification(method string, params *Params) *Request {
 func (r *Request) IsNotification() bool {
 	return r.Id.IsAbsent()
 }
+
+func validateRequest(request *Request) error {
+	if request.JsonRpc != "2.0" {
+
+	}
+	// check to make sure id is not Null.
+	// a null id is valid within the context of a response but not a request.
+	return nil
+}

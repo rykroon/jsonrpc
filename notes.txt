@@ -1,13 +1,10 @@
+some how I just learned (or relearned) that there is a v2 of the json package. Wish I had
+remembered that before putting in like 2 weeks of work into this project.
 
-Id and Params are both similar and different in a couple of ways
+Looks like there is a jsontext.Value struct that replces json.RawMessage
+I was considering creating my own JsonValue struct with some helper methods
+attached, and funny enough this new jsontext.Value has all of that.
 
-Both can be of a range of json types.
-- An id can be an integer or a string (in some cases null)
-- params can be an array, an object, or omitted
+I think what I'll do is Ill make Id and Params a type alias of Value.
 
-Both are different in the sense that an ID is part of a request AND a response,
-while params are only for requests.
-
-With an ID, it can only be int, string, or omitted from a request,
-for responses, it can an int, string, or null.
-
+And then Wherever neccesary I'll just do checks to make sure that the value is of the correct type.

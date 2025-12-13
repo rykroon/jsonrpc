@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -20,12 +21,12 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	if r.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "Invalid Content-Type", http.StatusUnsupportedMediaType)
+		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
 		return
 	}
 
@@ -34,15 +35,19 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	req := &Request{}
 	if err := decoder.Decode(&req); err != nil {
-		switch concreteErr := err.(type) {
-		case *json.SyntaxError:
-			err := NewError(ErrorCodeParseError, err.Error(), nil).(*Error)
-			h.writeResponse(w, NewErrorResp(NullId(), err))
-		case *Error:
-			h.writeResponse(w, NewErrorResp(NullId(), concreteErr))
-		default:
-			err := NewError(ErrorCodeInvalidRequest, err.Error(), nil).(*Error)
-			h.writeResponse(w, NewErrorResp(NullId(), err))
+		var (
+			syntaxErr *json.SyntaxError
+			typeErr   *json.UnmarshalTypeError
+		)
+		if errors.As(err, &syntaxErr) {
+			jsonRpcErr := NewError(ErrorCodeParseError, err.Error(), nil).(*Error)
+			h.writeResponse(w, NewErrorResp(NullId(), jsonRpcErr))
+		} else if errors.As(err, &typeErr) {
+			jsonRpcErr := NewError(ErrorCodeInvalidRequest, err.Error(), nil).(*Error)
+			h.writeResponse(w, NewErrorResp(NullId(), jsonRpcErr))
+		} else {
+			jsonRpcErr := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
+			h.writeResponse(w, NewErrorResp(NullId(), jsonRpcErr))
 		}
 		return
 	}
