@@ -6,6 +6,8 @@ import (
 	"strconv"
 )
 
+// copied code from experimental encoding/json/jsontext
+
 type value []byte
 
 // Clone returns a copy of v.
