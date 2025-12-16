@@ -53,9 +53,9 @@ func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
 
 	result, err := handler.HandleMethod(ctx, req.Params)
 	if err != nil {
-		e := &Error{}
-		if ok := errors.As(err, e); ok {
-			return NewErrorResp(req.Id, e)
+		jsonRpcErr := &Error{}
+		if ok := errors.As(err, jsonRpcErr); ok {
+			return NewErrorResp(req.Id, jsonRpcErr)
 		} else {
 			e := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
 			return NewErrorResp(req.Id, e)
