@@ -38,7 +38,7 @@ func (p *Params) UnmarshalJSON(data []byte) error {
 	if temp.Kind() != '{' && temp.Kind() != '[' {
 		return &json.UnmarshalTypeError{
 			Value: temp.Kind().String(),
-			Type:  reflect.TypeOf(p).Elem(),
+			Type:  reflect.TypeFor[Params](),
 		}
 	}
 	p.value = temp.Clone()

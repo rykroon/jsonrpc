@@ -36,7 +36,7 @@ func (i *Id) UnmarshalJSON(data []byte) error {
 	if temp.Kind() != 'n' && temp.Kind() != '"' && temp.Kind() != '0' {
 		return &json.UnmarshalTypeError{
 			Value: temp.Kind().String(),
-			Type:  reflect.TypeOf(i).Elem(),
+			Type:  reflect.TypeFor[Id](),
 		}
 	}
 	i.value = temp.Clone()
@@ -57,7 +57,7 @@ func (i Id) AsString() (string, error) {
 
 func (i Id) AsInt64() (int64, error) {
 	if i.value.Kind() != '0' {
-		return 0, errors.New("not an int")
+		return 0, errors.New("not a number")
 	}
 	n := json.Number("")
 	err := json.Unmarshal(i.value, &n)
