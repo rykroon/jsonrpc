@@ -59,6 +59,11 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Method == "" {
+		err := NewError(ErrorCodeInvalidRequest, "missing method", nil).(*Error)
+		h.writeResponse(w, NewErrorResp(req.Id, err))
+	}
+
 	resp := h.Server.ServeJsonRpc(r.Context(), req)
 	if resp == nil {
 		// a notification
