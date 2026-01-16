@@ -2,71 +2,38 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
+	"net/rpc"
 )
 
 type JsonRpcServer interface {
 	ServeJsonRpc(ctx context.Context, req *Request) *Response
 }
 
-type MethodHandler interface {
-	HandleMethod(context.Context, Params) (any, error)
-}
-
-type HandlerFunc func(context.Context, Params) (any, error)
-
-func (f HandlerFunc) HandleMethod(c context.Context, p Params) (any, error) {
-	return f(c, p)
-}
-
 type Server struct {
-	methods map[string]MethodHandler
+	server *rpc.Server
 }
 
 func NewServer() *Server {
 	return &Server{
-		methods: make(map[string]MethodHandler),
+		server: rpc.NewServer(),
 	}
 }
 
-func (s *Server) Register(method string, handler MethodHandler) {
-	s.methods[method] = handler
+func (s *Server) Register(rcvr any) {
+	s.server.Register(rcvr)
 }
 
-func (s *Server) RegisterFunc(method string, handler func(context.Context, Params) (any, error)) {
-	s.Register(method, HandlerFunc(handler))
+func (s *Server) RegisterName(name string, rcvr any) {
+	s.server.RegisterName(name, rcvr)
 }
 
 func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
-	handler, exists := s.methods[req.Method]
-	if !exists {
-		err := NewError(ErrorCodeMethodNotFound, "Method not found", nil).(*Error)
-		return NewErrorResp(req.Id, err)
-	}
-
+	codec := newCodec(req)
 	if req.IsNotification() {
-		// consider a way to check for invalid params before running the notification.
-		go handler.HandleMethod(ctx, req.Params)
+		go s.server.ServeRequest(codec)
 		return nil
 	}
 
-	result, err := handler.HandleMethod(ctx, req.Params)
-	if err != nil {
-		jsonRpcErr := &Error{}
-		if ok := errors.As(err, jsonRpcErr); ok {
-			return NewErrorResp(req.Id, jsonRpcErr)
-		} else {
-			e := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
-			return NewErrorResp(req.Id, e)
-		}
-	}
-
-	data, err := json.Marshal(result)
-	if err != nil {
-		jsonRpcErr := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
-		return NewErrorResp(req.Id, jsonRpcErr)
-	}
-
-	return NewSuccessResp(req.Id, data)
+	s.server.ServeRequest(codec)
+	return codec.resp
 }

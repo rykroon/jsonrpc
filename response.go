@@ -7,8 +7,8 @@ import (
 type Response struct {
 	JsonRpc string          `json:"jsonrpc"`
 	Id      Id              `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *Error          `json:"error,omitempty"`
+	Result  json.RawMessage `json:"result,omitzero"`
+	Error   *Error          `json:"error,omitzero"`
 }
 
 func NewSuccessResp(id Id, result json.RawMessage) *Response {

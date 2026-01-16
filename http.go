@@ -30,6 +30,8 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+
 	// add logic for batched requests.
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -39,52 +41,51 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			syntaxErr *json.SyntaxError
 			typeErr   *json.UnmarshalTypeError
 		)
+		var jsonRpcErr *Error
 		if errors.As(err, &syntaxErr) {
-			jsonRpcErr := NewError(ErrorCodeParseError, err.Error(), nil).(*Error)
-			h.writeResponse(w, NewErrorResp(NullId(), jsonRpcErr))
+			jsonRpcErr = &Error{Code: ErrorCodeParseError, Message: err.Error()}
 		} else if errors.As(err, &typeErr) {
-			jsonRpcErr := NewError(ErrorCodeInvalidRequest, err.Error(), nil).(*Error)
-			h.writeResponse(w, NewErrorResp(NullId(), jsonRpcErr))
+			jsonRpcErr = &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
 		} else {
-			jsonRpcErr := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
-			h.writeResponse(w, NewErrorResp(NullId(), jsonRpcErr))
+			jsonRpcErr = &Error{Code: ErrorCodeInternalError, Message: err.Error()}
 		}
+		h.writeResponse(w, NewErrorResp(NullId(), jsonRpcErr))
 		return
 	}
 
 	// validate Request
 	if req.JsonRpc != "2.0" {
-		err := NewError(ErrorCodeInvalidRequest, "jsonrpc must be 2.0", nil).(*Error)
+		err := &Error{Code: ErrorCodeInvalidRequest, Message: "jsonrpc must be 2.0"}
 		h.writeResponse(w, NewErrorResp(req.Id, err))
 		return
 	}
 
 	if req.Method == "" {
-		err := NewError(ErrorCodeInvalidRequest, "missing method", nil).(*Error)
+		err := &Error{Code: ErrorCodeInvalidRequest, Message: "missing method"}
 		h.writeResponse(w, NewErrorResp(req.Id, err))
 	}
 
-	resp := h.Server.ServeJsonRpc(r.Context(), req)
-	if resp == nil {
-		// a notification
+	if req.IsNotification() {
+		go h.Server.ServeJsonRpc(r.Context(), req)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		err := NewError(
-			ErrorCodeInternalError,
-			fmt.Sprintf("failed to encode jsonrpc response as json: %s", err.Error()),
-			nil,
-		).(*Error)
+	resp := h.Server.ServeJsonRpc(r.Context(), req)
+	err := h.writeResponse(w, resp)
+
+	if err != nil {
+		err := &Error{
+			Code:    ErrorCodeInternalError,
+			Message: fmt.Sprintf("failed to encode jsonrpc response as json: %s", err.Error()),
+		}
 		h.writeResponse(w, NewErrorResp(req.Id, err))
 	}
 }
 
-func (h *HttpHandler) writeResponse(w http.ResponseWriter, resp *Response) {
+func (h *HttpHandler) writeResponse(w http.ResponseWriter, resp *Response) error {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return json.NewEncoder(w).Encode(resp)
 }
 
 func NewHttpRequest(url string, req *Request) (*http.Request, error) {

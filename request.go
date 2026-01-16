@@ -24,5 +24,5 @@ func NewNotification(method string, params *Params) *Request {
 }
 
 func (r *Request) IsNotification() bool {
-	return len(r.Id.value) == 0
+	return len(r.Id) == 0
 }
