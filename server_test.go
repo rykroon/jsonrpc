@@ -1,7 +1,6 @@
 package jsonrpc
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,9 +9,15 @@ import (
 func TestJsonRpcServer(t *testing.T) {
 	server := NewServer()
 
-	server.RegisterFunc("echo", func(ctx context.Context, params Params) (any, error) {
-		return "echo", nil
+	type EchoParams struct {
+		Echo string `json:"echo"`
+	}
+
+	server.Register("echo", func(params EchoParams) (string, error) {
+		return params.Echo, nil
 	})
+
+	params, _ := NewParams(EchoParams{Echo: "echo"})
 
 	tests := []struct {
 		name     string
@@ -21,7 +26,7 @@ func TestJsonRpcServer(t *testing.T) {
 	}{
 		{
 			"test_1",
-			NewRequest("echo", nil, NewId(123)),
+			NewRequest("echo", params, NewId(123)),
 			NewSuccessResp(NewId(123), []byte(`"echo"`)),
 		},
 	}

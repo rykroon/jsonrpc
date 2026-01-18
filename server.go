@@ -8,50 +8,49 @@ import (
 
 type JsonRpcServer interface {
 	ServeJsonRpc(ctx context.Context, req *Request) *Response
-}
-
-type MethodHandler interface {
-	HandleMethod(context.Context, Params) (any, error)
-}
-
-type HandlerFunc func(context.Context, Params) (any, error)
-
-func (f HandlerFunc) HandleMethod(c context.Context, p Params) (any, error) {
-	return f(c, p)
+	Register(string, any) error
 }
 
 type Server struct {
-	methods map[string]MethodHandler
+	methods map[string]funcValue
 }
 
 func NewServer() *Server {
 	return &Server{
-		methods: make(map[string]MethodHandler),
+		methods: make(map[string]funcValue),
 	}
 }
 
-func (s *Server) Register(method string, handler MethodHandler) {
-	s.methods[method] = handler
-}
+func (s *Server) Register(method string, fn any) error {
+	fv, err := newFuncValue(fn)
+	if err != nil {
+		return err
+	}
+	s.methods[method] = fv
+	return nil
 
-func (s *Server) RegisterFunc(method string, handler func(context.Context, Params) (any, error)) {
-	s.Register(method, HandlerFunc(handler))
 }
 
 func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
-	handler, exists := s.methods[req.Method]
+	fn, exists := s.methods[req.Method]
 	if !exists {
 		err := NewError(ErrorCodeMethodNotFound, "Method not found", nil).(*Error)
 		return NewErrorResp(req.Id, err)
 	}
 
+	args := fn.NewArgs()
+	err := req.Params.Decode(args.Interface())
+	if err != nil {
+		err := NewError(ErrorCodeInvalidParams, "invalid params", nil).(*Error)
+		return NewErrorResp(req.Id, err)
+	}
+
 	if req.IsNotification() {
-		// consider a way to check for invalid params before running the notification.
-		go handler.HandleMethod(ctx, req.Params)
+		go fn.Call(args.Elem())
 		return nil
 	}
 
-	result, err := handler.HandleMethod(ctx, req.Params)
+	result, err := fn.Call(args.Elem())
 	if err != nil {
 		jsonRpcErr := &Error{}
 		if ok := errors.As(err, jsonRpcErr); ok {
