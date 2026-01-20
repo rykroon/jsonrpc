@@ -7,33 +7,27 @@ import (
 )
 
 func TestNewIdString(t *testing.T) {
-	s1 := "Hello World"
-	id := NewId(s1)
+	id := NewIdString("Hello World")
+	s, ok := id.String()
+	require.Equal(t, ok, true)
+	require.Equal(t, s, "Hello World")
 
-	s2, err := id.AsString()
-	if err != nil {
-		t.Errorf("unexpected error: %s", err)
-	}
-	require.Equal(t, s1, s2)
+	i, ok := id.Int()
+	require.Equal(t, ok, false)
+	require.Equal(t, i, 0)
 
-	_, err = id.AsInt64()
-	if err == nil {
-		t.Error("expected an error")
-	}
+	require.Equal(t, id.IsNull(), false)
 }
 
 func TestNewIdInt(t *testing.T) {
-	i1 := 100
-	id := NewId(i1)
+	id := NewIdInt(123)
+	s, ok := id.String()
+	require.Equal(t, ok, false)
+	require.Equal(t, s, "")
 
-	i2, err := id.AsInt64()
-	if err != nil {
-		t.Errorf("unexpected error: %s", err)
-	}
-	require.Equal(t, int64(i1), i2)
+	i, ok := id.Int()
+	require.Equal(t, ok, true)
+	require.Equal(t, i, 123)
 
-	_, err = id.AsString()
-	if err == nil {
-		t.Error("expected an error")
-	}
+	require.Equal(t, id.IsNull(), false)
 }

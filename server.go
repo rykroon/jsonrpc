@@ -3,11 +3,10 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
-	"errors"
 )
 
 type JsonRpcServer interface {
-	ServeJsonRpc(ctx context.Context, req *Request) *Response
+	ServeJsonRpc(ctx context.Context, req Request) Response
 	Register(string, any) error
 }
 
@@ -31,18 +30,18 @@ func (s *Server) Register(method string, fn any) error {
 
 }
 
-func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
-	fn, exists := s.methods[req.Method]
+func (s *Server) ServeJsonRpc(ctx context.Context, req Request) Response {
+	fn, exists := s.methods[req.Method()]
 	if !exists {
-		err := NewError(ErrorCodeMethodNotFound, "Method not found", nil).(*Error)
-		return NewErrorResp(req.Id, err)
+		err := NewError(ErrorCodeMethodNotFound, "Method not found", nil)
+		return NewErrorResponse(err, req.Id())
 	}
 
 	args := fn.NewArgs()
-	err := req.Params.Decode(args.Interface())
+	err := req.Params().DecodeInto(args.Interface())
 	if err != nil {
-		err := NewError(ErrorCodeInvalidParams, "invalid params", nil).(*Error)
-		return NewErrorResp(req.Id, err)
+		err := NewError(ErrorCodeInvalidParams, "invalid params", nil)
+		return NewErrorResponse(err, req.Id())
 	}
 
 	if req.IsNotification() {
@@ -52,20 +51,15 @@ func (s *Server) ServeJsonRpc(ctx context.Context, req *Request) *Response {
 
 	result, err := fn.Call(args.Elem())
 	if err != nil {
-		jsonRpcErr := &Error{}
-		if ok := errors.As(err, jsonRpcErr); ok {
-			return NewErrorResp(req.Id, jsonRpcErr)
-		} else {
-			e := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
-			return NewErrorResp(req.Id, e)
-		}
+		e := NewError(ErrorCodeInternalError, err.Error(), nil)
+		return NewErrorResponse(e, req.Id())
 	}
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		jsonRpcErr := NewError(ErrorCodeInternalError, err.Error(), nil).(*Error)
-		return NewErrorResp(req.Id, jsonRpcErr)
+		jsonRpcErr := NewError(ErrorCodeInternalError, err.Error(), nil)
+		return NewErrorResponse(jsonRpcErr, req.Id())
 	}
 
-	return NewSuccessResp(req.Id, data)
+	return NewSuccessResponse(data, req.Id())
 }

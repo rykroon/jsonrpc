@@ -2,71 +2,79 @@ package jsonrpc
 
 import (
 	"encoding/json"
-	"errors"
-	"reflect"
-
-	"golang.org/x/exp/constraints"
+	"slices"
 )
 
-// A JSON-RPC Id
-type Id struct {
-	value value
+type Id interface {
+	String() (string, bool)
+	Int() (int, bool)
+	IsNull() bool
 }
 
-// Create a new JSON-RPC Id
-func NewId[T string | constraints.Integer](v T) Id {
-	data, _ := json.Marshal(v)
-	return Id{data}
+type idString string
+
+func NewIdString(s string) Id {
+	return idString(s)
 }
+
+func (i idString) String() (string, bool) {
+	return string(i), true
+}
+
+func (i idString) Int() (int, bool) {
+	return 0, false
+}
+
+func (i idString) IsNull() bool {
+	return false
+}
+
+type idInt int
+
+func NewIdInt(i int) Id {
+	return idInt(i)
+}
+
+func (i idInt) String() (string, bool) {
+	return "", false
+}
+
+func (i idInt) Int() (int, bool) {
+	return int(i), true
+}
+
+func (i idInt) IsNull() bool {
+	return false
+}
+
+type idBytes []byte
 
 func NullId() Id {
-	return Id{[]byte("null")}
+	return idBytes("null")
 }
 
-func (id Id) String() string {
-	return id.value.String()
-}
-
-func (id Id) MarshalJSON() ([]byte, error) {
-	return json.Marshal(id.value)
-}
-
-func (i *Id) UnmarshalJSON(data []byte) error {
-	temp := value(data)
-	if temp.Kind() != 'n' && temp.Kind() != '"' && temp.Kind() != '0' {
-		return &json.UnmarshalTypeError{
-			Value: temp.Kind().String(),
-			Type:  reflect.TypeFor[Id](),
+func (i idBytes) String() (string, bool) {
+	if len(i) != 0 && i[0] == '"' {
+		s := ""
+		err := json.Unmarshal(i, &s)
+		if err == nil {
+			return s, true
 		}
 	}
-	i.value = temp.Clone()
-	return nil
+	return "", false
 }
 
-func (i Id) AsString() (string, error) {
-	if i.value.Kind() != '"' {
-		return "", errors.New("not a string")
+func (id idBytes) Int() (int, bool) {
+	if len(id) != 0 && id[0] == '-' || ('0' <= id[0] && id[0] <= '9') {
+		i := 0
+		err := json.Unmarshal(id, &i)
+		if err == nil {
+			return i, true
+		}
 	}
-	s := ""
-	err := json.Unmarshal(i.value, &s)
-	if err != nil {
-		return "", err
-	}
-	return s, nil
+	return 0, false
 }
 
-func (i Id) AsInt64() (int64, error) {
-	if i.value.Kind() != '0' {
-		return 0, errors.New("not a number")
-	}
-	n := json.Number("")
-	err := json.Unmarshal(i.value, &n)
-	if err != nil {
-		return 0, err
-	}
-	integer, err := n.Int64()
-	if err != nil {
-		return 0, err
-	}
-	return integer, nil
+func (id idBytes) IsNull() bool {
+	return slices.Equal(id, []byte("null"))
 }

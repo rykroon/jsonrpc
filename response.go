@@ -1,28 +1,71 @@
 package jsonrpc
 
-import (
-	"encoding/json"
-)
+import "encoding/json"
 
-type Response struct {
-	JsonRpc string          `json:"jsonrpc"`
-	Id      Id              `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *Error          `json:"error,omitempty"`
+type Response interface {
+	Jsonrpc() string
+	Result() any
+	Error() Error
+	Id() Id
 }
 
-func NewSuccessResp(id Id, result json.RawMessage) *Response {
-	return &Response{"2.0", id, result, nil}
+type serverResponse struct {
+	id     Id
+	result any
+	error  Error
 }
 
-func NewErrorResp(id Id, err *Error) *Response {
-	return &Response{"2.0", id, nil, err}
+func (r serverResponse) Jsonrpc() string {
+	return "2.0"
 }
 
-func (r *Response) IsSuccess() bool {
-	return r.Result != nil
+func (r serverResponse) Id() Id {
+	return r.id
 }
 
-func (r *Response) IsError() bool {
-	return r.Error != nil
+func (r serverResponse) Error() Error {
+	return r.error
+}
+
+func (r serverResponse) Result() any {
+	return r.result
+}
+
+type serverSuccessResponse struct {
+	serverResponse
+	result any
+}
+
+func NewErrorResponse(error Error, id Id) Response {
+	return serverResponse{
+		id:    id,
+		error: error,
+	}
+}
+
+func NewSuccessResponse(result any, id Id) Response {
+	return serverResponse{
+		id:     id,
+		result: result,
+	}
+}
+
+type clientResponse struct {
+	RawJsonrpc json.RawMessage
+	RawResult  json.RawMessage
+	RawError   json.RawMessage
+	RawId      idBytes
+}
+
+func (r clientResponse) Jsonrpc() string {
+	s := ""
+	err := json.Unmarshal(r.RawJsonrpc, &s)
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
+func (r clientResponse) Id() Id {
+	return r.RawId
 }

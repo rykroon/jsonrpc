@@ -17,17 +17,17 @@ func TestJsonRpcServer(t *testing.T) {
 		return params.Echo, nil
 	})
 
-	params, _ := NewParams(EchoParams{Echo: "echo"})
+	params := NewParamFromMap(map[string]string{"echo": "echo"})
 
 	tests := []struct {
 		name     string
-		in       *Request
-		expected *Response
+		in       Request
+		expected Response
 	}{
 		{
 			"test_1",
-			NewRequest("echo", params, NewId(123)),
-			NewSuccessResp(NewId(123), []byte(`"echo"`)),
+			NewRequest("echo", params, NewIdInt(123)),
+			NewSuccessResponse("echo", NewIdInt(123)),
 		},
 	}
 

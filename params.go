@@ -1,66 +1,80 @@
 package jsonrpc
 
-import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"reflect"
-)
+import "encoding/json"
 
-type Params struct {
-	value value
+type Params interface {
+	ByPosition() bool
+	ByName() bool
+	IsAbsent() bool // maybe not?
+	DecodeInto(any) error
 }
 
-func NewParams(v any) (*Params, error) {
-	data, err := json.Marshal(v)
+type paramBytes []byte
+
+func (p paramBytes) ByPosition() bool {
+	return len(p) != 0 && p[0] == '['
+}
+
+func (p paramBytes) ByName() bool {
+	return len(p) != 0 && p[0] == '{'
+}
+
+func (p paramBytes) IsAbsent() bool {
+	return len(p) == 0
+}
+
+func (p paramBytes) DecodeInto(v any) error {
+	return json.Unmarshal(p, v)
+}
+
+type paramMap[T any] map[string]T
+
+func NewParamFromMap[T any](m map[string]T) Params {
+	return paramMap[T](m)
+}
+
+func (pm paramMap[T]) ByPosition() bool {
+	return false
+}
+
+func (pm paramMap[T]) ByName() bool {
+	return true
+}
+
+func (pm paramMap[T]) IsAbsent() bool {
+	return false
+}
+
+func (pm paramMap[T]) DecodeInto(v any) error {
+	b, err := json.Marshal(pm)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal json: %w", err)
+		return err
 	}
+	return json.Unmarshal(b, v)
+}
 
-	p := &Params{}
-	err = p.UnmarshalJSON(data)
+type paramSlice[T any] []T
+
+func NewParamFromSlice[T any](s []T) Params {
+	return paramSlice[T](s)
+}
+
+func (ps paramSlice[T]) ByPosition() bool {
+	return true
+}
+
+func (ps paramSlice[T]) ByName() bool {
+	return false
+}
+
+func (ps paramSlice[T]) IsAbsent() bool {
+	return false
+}
+
+func (ps paramSlice[T]) DecodeInto(v any) error {
+	b, err := json.Marshal(ps)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return p, nil
-}
-
-func (p Params) String() string {
-	return p.value.String()
-}
-
-func (p Params) MarshalJSON() ([]byte, error) {
-	return json.Marshal(p.value)
-}
-
-func (p *Params) UnmarshalJSON(data []byte) error {
-	temp := value(data)
-	if temp.Kind() != '{' && temp.Kind() != '[' {
-		return &json.UnmarshalTypeError{
-			Value: temp.Kind().String(),
-			Type:  reflect.TypeFor[Params](),
-		}
-	}
-	p.value = temp.Clone()
-	return nil
-}
-
-func (p Params) IsAbsent() bool {
-	return len(p.value) == 0
-}
-
-func (p Params) ByPosition() bool {
-	return p.value.Kind() == '['
-}
-
-func (p Params) ByName() bool {
-	return p.value.Kind() == '{'
-}
-
-// Decode the params into a value
-func (p Params) Decode(v any) error {
-	if p.IsAbsent() {
-		return errors.New("no params")
-	}
-	return json.Unmarshal(p.value, v)
+	return json.Unmarshal(b, v)
 }
