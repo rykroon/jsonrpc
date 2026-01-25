@@ -2,7 +2,9 @@ package jsonrpc
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"iter"
 	"strconv"
 )
 
@@ -47,9 +49,9 @@ func (v *value) UnmarshalJSON(b []byte) error {
 
 // Kind returns the starting token kind.
 // For a valid value, this will never include '}' or ']'.
-func (v value) Kind() Kind {
+func (v value) Kind() kind {
 	if v := v[consumeWhitespace(v):]; len(v) > 0 {
-		return Kind(v[0]).normalize()
+		return kind(v[0]).normalize()
 	}
 	return invalidKind
 }
@@ -79,12 +81,12 @@ func consumeWhitespace(b []byte) (n int) {
 //
 // An invalid kind is usually represented using 0,
 // but may be non-zero due to invalid JSON data.
-type Kind byte
+type kind byte
 
-const invalidKind Kind = 0
+const invalidKind kind = 0
 
 // String prints the kind in a humanly readable fashion.
-func (k Kind) String() string {
+func (k kind) String() string {
 	switch k {
 	case 'n':
 		return "null"
@@ -97,11 +99,11 @@ func (k Kind) String() string {
 	case '0':
 		return "number"
 	case '{':
-		return "object"
+		return "{"
 	case '}':
 		return "}"
 	case '[':
-		return "array"
+		return "["
 	case ']':
 		return "]"
 	default:
@@ -110,9 +112,46 @@ func (k Kind) String() string {
 }
 
 // normalize coalesces all possible starting characters of a number as just '0'.
-func (k Kind) normalize() Kind {
+func (k kind) normalize() kind {
 	if k == '-' || ('0' <= k && k <= '9') {
 		return '0'
 	}
 	return k
+}
+
+func IterJsonObject(data []byte) iter.Seq2[string, json.RawMessage] {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	return func(yield func(key string, value json.RawMessage) bool) {
+		tk, err := dec.Token()
+		if err != nil {
+			return
+		}
+		delim, ok := tk.(json.Delim)
+		if !ok || delim != '{' {
+			return
+		}
+
+		for dec.More() {
+			tk, err := dec.Token()
+			if err != nil {
+				return
+			}
+
+			key, ok := tk.(string)
+			if !ok {
+				return
+			}
+
+			value := json.RawMessage{}
+			err = dec.Decode(&value)
+			if err != nil {
+				return
+			}
+
+			if !yield(key, value) {
+				return
+			}
+		}
+	}
 }
