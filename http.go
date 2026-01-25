@@ -33,8 +33,8 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// add logic for batched requests.
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	svrReq := &serverRequest{}
-	if err := decoder.Decode(&svrReq); err != nil {
+	req := &serverRequest{}
+	if err := decoder.Decode(&req); err != nil {
 		var (
 			syntaxErr *json.SyntaxError
 			typeErr   *json.UnmarshalTypeError
@@ -50,20 +50,6 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeResponse(w, NewErrorResponse(jsonRpcErr, NullId()))
 		}
 		return
-	}
-
-	var req Request = svrReq
-
-	// validate Request
-	if req.Jsonrpc() != "2.0" {
-		err := NewError(ErrorCodeInvalidRequest, "jsonrpc must be 2.0", nil)
-		h.writeResponse(w, NewErrorResponse(err, req.Id()))
-		return
-	}
-
-	if req.Method() == "" {
-		err := NewError(ErrorCodeInvalidRequest, "missing method", nil)
-		h.writeResponse(w, NewErrorResponse(err, req.Id()))
 	}
 
 	resp := h.Server.ServeJsonRpc(r.Context(), req)

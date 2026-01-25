@@ -26,8 +26,8 @@ func TestJsonRpcServer(t *testing.T) {
 	}{
 		{
 			"test_1",
-			NewRequest("echo", params, NewIdInt(123)),
-			NewSuccessResponse("echo", NewIdInt(123)),
+			NewRequest("echo", params, NewId(123)),
+			NewSuccessResponse("echo", NewId(123)),
 		},
 	}
 
