@@ -7,7 +7,7 @@ type Request interface {
 	Method() string
 	Params() Params
 	Id() Id
-	IsNotification() bool
+	// json.Marshaler
 }
 
 type clientRequest struct {
@@ -44,15 +44,26 @@ func (r clientRequest) Params() Params {
 	return r.params
 }
 
-func (r clientRequest) IsNotification() bool {
-	return r.id == nil
+func (r clientRequest) MarshalJSON() ([]byte, error) {
+	temp := struct {
+		Jsonrpc string `json:"jsonrpc"`
+		Method  string `json:"method"`
+		Params  Params `json:"params,omitzero"`
+		Id      Id     `json:"id,omitzero"`
+	}{
+		Jsonrpc: r.Jsonrpc(),
+		Method:  r.Method(),
+		Params:  r.Params(),
+		Id:      r.Id(),
+	}
+	return json.Marshal(temp)
 }
 
 type serverRequest struct {
 	RawJsonrpc json.RawMessage `json:"jsonrpc"`
 	RawMethod  json.RawMessage `json:"method"`
-	RawId      idBytes         `json:"id"`
-	RawParams  paramBytes      `json:"params"`
+	RawId      json.RawMessage `json:"id"`
+	RawParams  json.RawMessage `json:"params"`
 }
 
 func (r serverRequest) Jsonrpc() string {
@@ -74,13 +85,32 @@ func (r serverRequest) Method() string {
 }
 
 func (r serverRequest) Id() Id {
-	return r.RawId
+	if len(r.RawId) == 0 {
+		return nil
+	}
+	id := rawId(r.RawId)
+	return &id
 }
 
 func (r serverRequest) Params() Params {
-	return r.RawParams
+	if len(r.RawParams) == 0 {
+		return nil
+	}
+	params := rawParams(r.RawParams)
+	return &params
 }
 
-func (r serverRequest) IsNotification() bool {
-	return len(r.RawId) == 0
+func EncodeRequest(req Request) ([]byte, error) {
+	temp := struct {
+		Jsonrpc string `json:"jsonrpc"`
+		Method  string `json:"method"`
+		Params  Params `json:"params,omitzero"`
+		Id      Id     `json:"id,omitzero"`
+	}{
+		Jsonrpc: req.Jsonrpc(),
+		Method:  req.Method(),
+		Params:  req.Params(),
+		Id:      req.Id(),
+	}
+	return json.Marshal(temp)
 }

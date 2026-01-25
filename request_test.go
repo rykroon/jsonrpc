@@ -12,5 +12,4 @@ func TestRequest(t *testing.T) {
 	require.Equal(t, req.Method(), "test")
 	require.Equal(t, req.Params(), nil)
 	require.Equal(t, req.Id(), nil)
-	require.Equal(t, req.IsNotification(), true)
 }
