@@ -10,15 +10,15 @@ import (
 
 // copied code from experimental encoding/json/jsontext
 
-type value []byte
+type jsonValue []byte
 
 // Clone returns a copy of v.
-func (v value) Clone() value {
+func (v jsonValue) Clone() jsonValue {
 	return bytes.Clone(v)
 }
 
 // String returns the string formatting of v.
-func (v value) String() string {
+func (v jsonValue) String() string {
 	if v == nil {
 		return "null"
 	}
@@ -28,7 +28,7 @@ func (v value) String() string {
 // MarshalJSON returns v as the JSON encoding of v.
 // It returns the stored value as the raw JSON output without any validation.
 // If v is nil, then this returns a JSON null.
-func (v value) MarshalJSON() ([]byte, error) {
+func (v jsonValue) MarshalJSON() ([]byte, error) {
 	// NOTE: This matches the behavior of v1 json.RawMessage.MarshalJSON.
 	if v == nil {
 		return []byte("null"), nil
@@ -38,7 +38,7 @@ func (v value) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON sets v as the JSON encoding of b.
 // It stores a copy of the provided raw JSON input without any validation.
-func (v *value) UnmarshalJSON(b []byte) error {
+func (v *jsonValue) UnmarshalJSON(b []byte) error {
 	// NOTE: This matches the behavior of v1 json.RawMessage.UnmarshalJSON.
 	if v == nil {
 		return errors.New("jsontext.Value: UnmarshalJSON on nil pointer")
@@ -49,7 +49,7 @@ func (v *value) UnmarshalJSON(b []byte) error {
 
 // Kind returns the starting token kind.
 // For a valid value, this will never include '}' or ']'.
-func (v value) Kind() kind {
+func (v jsonValue) Kind() kind {
 	if v := v[consumeWhitespace(v):]; len(v) > 0 {
 		return kind(v[0]).normalize()
 	}

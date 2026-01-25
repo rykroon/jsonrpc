@@ -21,11 +21,11 @@ type Params interface {
 type rawParams []byte
 
 func (p rawParams) ByPosition() bool {
-	return len(p) != 0 && p[0] == '['
+	return jsonValue(p).Kind() == '['
 }
 
 func (p rawParams) ByName() bool {
-	return len(p) != 0 && p[0] == '{'
+	return jsonValue(p).Kind() == '{'
 }
 
 func (p rawParams) DecodeInto(v any) error {
@@ -51,15 +51,6 @@ func (p rawParams) At(idx int) (any, bool) {
 func (p rawParams) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]byte(p))
 }
-
-// func (p *rawParams) UnmarshalJSON(data []byte) error {
-// 	if !isJsonObject(data) && !isJsonArray(data) {
-// 		// return json.UnmarshalTypeError ??
-// 		return NewError(0, "params must be an object or array", nil)
-// 	}
-// 	*p = data
-// 	return nil
-// }
 
 type mapParams[T any] map[string]T
 
@@ -99,18 +90,9 @@ func (p mapParams[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]T(p))
 }
 
-// func (p mapParams[T]) UnmarshalJSON(data []byte) error {
-// 	m := map[string]T{}
-// 	err := json.Unmarshal(data, &m)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	pm = m
-// 	return nil
-// }
-
 type sliceParams[T any] []T
 
+// NewPositionalParams() ??? make variadic???
 func NewParamFromSlice[T any](s []T) Params {
 	return sliceParams[T](s)
 }
@@ -145,13 +127,3 @@ func (p sliceParams[T]) At(idx int) (any, bool) {
 func (p sliceParams[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]T(p))
 }
-
-// func (ps sliceParams[T]) UnmarshalJSON(data []byte) error {
-// 	s := []T{}
-// 	err := json.Unmarshal(data, &s)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	ps = s
-// 	return nil
-// }
