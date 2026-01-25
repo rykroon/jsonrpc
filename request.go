@@ -7,8 +7,10 @@ type Request interface {
 	Method() string
 	Params() Params
 	Id() Id
-	// json.Marshaler
 }
+
+type RequestEncoder func(req Request) ([]byte, error)
+type RequestDecoder func([]byte) (Request, error)
 
 type clientRequest struct {
 	method string
@@ -42,21 +44,6 @@ func (r clientRequest) Id() Id {
 
 func (r clientRequest) Params() Params {
 	return r.params
-}
-
-func (r clientRequest) MarshalJSON() ([]byte, error) {
-	temp := struct {
-		Jsonrpc string `json:"jsonrpc"`
-		Method  string `json:"method"`
-		Params  Params `json:"params,omitzero"`
-		Id      Id     `json:"id,omitzero"`
-	}{
-		Jsonrpc: r.Jsonrpc(),
-		Method:  r.Method(),
-		Params:  r.Params(),
-		Id:      r.Id(),
-	}
-	return json.Marshal(temp)
 }
 
 type serverRequest struct {
@@ -100,7 +87,7 @@ func (r serverRequest) Params() Params {
 	return &params
 }
 
-func EncodeRequest(req Request) ([]byte, error) {
+func DefaultRequestEncoder(req Request) ([]byte, error) {
 	temp := struct {
 		Jsonrpc string `json:"jsonrpc"`
 		Method  string `json:"method"`

@@ -2,7 +2,6 @@ package jsonrpc
 
 import (
 	"encoding/json"
-	"errors"
 )
 
 type Response interface {
@@ -10,9 +9,10 @@ type Response interface {
 	Result() any
 	Error() Error
 	Id() Id
-	json.Marshaler
-	json.Unmarshaler
 }
+
+type ResponseEncoder func(Response) ([]byte, error)
+type ResponseDecoder func([]byte) (Response, error)
 
 type serverResponse struct {
 	id     Id
@@ -48,24 +48,6 @@ func (r serverResponse) Error() Error {
 
 func (r serverResponse) Result() any {
 	return r.result
-}
-
-func (r serverResponse) MarshalJSON() ([]byte, error) {
-	temp := map[string]any{
-		"jsonrpc": r.Jsonrpc(),
-		"id":      r.Id(),
-	}
-	if r.Error() != nil {
-		temp["error"] = r.Error()
-	} else {
-		temp["result"] = r.Result()
-	}
-
-	return json.Marshal(temp)
-}
-
-func (r serverResponse) UnmarshalJSON(b []byte) error {
-	return errors.New("not implemented")
 }
 
 type clientResponse struct {
@@ -114,4 +96,17 @@ func (r clientResponse) Id() Id {
 	}
 	id := rawId(r.RawId)
 	return &id
+}
+
+func DefaultResponseEncoder(resp Response) ([]byte, error) {
+	temp := map[string]any{
+		"jsonrpc": resp.Jsonrpc(),
+		"id":      resp.Id(),
+	}
+	if resp.Error() != nil {
+		temp["error"] = resp.Error()
+	} else {
+		temp["result"] = resp.Result()
+	}
+	return json.Marshal(temp)
 }
