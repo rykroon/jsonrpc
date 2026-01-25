@@ -7,7 +7,7 @@ import (
 )
 
 func TestNewIdString(t *testing.T) {
-	id := NewIdString("Hello World")
+	id := NewId("Hello World")
 	s, ok := id.String()
 	require.Equal(t, ok, true)
 	require.Equal(t, s, "Hello World")
@@ -20,7 +20,7 @@ func TestNewIdString(t *testing.T) {
 }
 
 func TestNewIdInt(t *testing.T) {
-	id := NewIdInt(123)
+	id := NewId(123)
 	s, ok := id.String()
 	require.Equal(t, ok, false)
 	require.Equal(t, s, "")
@@ -30,4 +30,17 @@ func TestNewIdInt(t *testing.T) {
 	require.Equal(t, i, 123)
 
 	require.Equal(t, id.IsNull(), false)
+}
+
+func TestNullId(t *testing.T) {
+	id := NullId()
+	s, ok := id.String()
+	require.Equal(t, ok, false)
+	require.Equal(t, s, "")
+
+	i, ok := id.Int()
+	require.Equal(t, ok, false)
+	require.Equal(t, i, 0)
+
+	require.Equal(t, id.IsNull(), true)
 }

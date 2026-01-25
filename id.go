@@ -2,79 +2,85 @@ package jsonrpc
 
 import (
 	"encoding/json"
-	"slices"
 )
 
 type Id interface {
 	String() (string, bool)
 	Int() (int, bool)
 	IsNull() bool
+	json.Marshaler
 }
 
-type idString string
-
-func NewIdString(s string) Id {
-	return idString(s)
+type idType struct {
+	value any
 }
 
-func (i idString) String() (string, bool) {
-	return string(i), true
+func NewId[T string | int](v T) Id {
+	return idType{v}
 }
-
-func (i idString) Int() (int, bool) {
-	return 0, false
-}
-
-func (i idString) IsNull() bool {
-	return false
-}
-
-type idInt int
-
-func NewIdInt(i int) Id {
-	return idInt(i)
-}
-
-func (i idInt) String() (string, bool) {
-	return "", false
-}
-
-func (i idInt) Int() (int, bool) {
-	return int(i), true
-}
-
-func (i idInt) IsNull() bool {
-	return false
-}
-
-type idBytes []byte
 
 func NullId() Id {
-	return idBytes("null")
+	return idType{nil}
 }
 
-func (i idBytes) String() (string, bool) {
-	if len(i) != 0 && i[0] == '"' {
-		s := ""
-		err := json.Unmarshal(i, &s)
-		if err == nil {
-			return s, true
-		}
+func (id idType) String() (string, bool) {
+	s, ok := id.value.(string)
+	return s, ok
+}
+
+func (id idType) Int() (int, bool) {
+	i, ok := id.value.(int)
+	return i, ok
+}
+
+func (id idType) IsNull() bool {
+	return id.value == nil
+}
+
+func (id idType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(id.value)
+}
+
+// func (id idType) UnmarshalJSON(data []byte) error {
+// 	if !isJsonInt(data) || !isJsonString(data) || !isJsonNull(data) {
+// 		// return json.UnmarshalTypeError
+// 		return NewError(0, "id must be string, int or null", nil)
+// 	}
+// 	return json.Unmarshal(data, &id.value)
+// }
+
+type rawId []byte
+
+func (id rawId) String() (string, bool) {
+	if value(id).Kind() != 's' {
+		return "", false
 	}
-	return "", false
+	s := ""
+	err := json.Unmarshal(id, &s)
+	return s, err == nil
 }
 
-func (id idBytes) Int() (int, bool) {
-	if len(id) != 0 && id[0] == '-' || ('0' <= id[0] && id[0] <= '9') {
-		i := 0
-		err := json.Unmarshal(id, &i)
-		if err == nil {
-			return i, true
-		}
+func (id rawId) Int() (int, bool) {
+	if value(id).Kind() != '0' {
+		return 0, false
 	}
-	return 0, false
+	i := 0
+	err := json.Unmarshal(id, &i)
+	return i, err == nil
 }
 
-func (id idBytes) IsNull() bool {
-	return slices.Equal(id, []byte("null"))
+func (id rawId) IsNull() bool {
+	return value(id).Kind() != 'n'
 }
+
+func (id rawId) MarshalJSON() ([]byte, error) {
+	return id, nil
+}
+
+// func (id *rawId) UnmarshalJSON(data []byte) error {
+// 	if !isJsonInt(data) || !isJsonString(data) || !isJsonNull(data) {
+// 		return NewError(0, "id must be string, int or null", nil)
+// 	}
+// 	*id = data
+// 	return nil
+// }
