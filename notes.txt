@@ -1,10 +1,7 @@
-some how I just learned (or relearned) that there is a v2 of the json package. Wish I had
-remembered that before putting in like 2 weeks of work into this project.
+I generally like the idea of having most things an interface.
+However I think I went overboard with some of the interfaces.
 
-Looks like there is a jsontext.Value struct that replces json.RawMessage
-I was considering creating my own JsonValue struct with some helper methods
-attached, and funny enough this new jsontext.Value has all of that.
+especially with params.
+chatgpt says keep interfaces small 1-3 methods.
+only focus on what the caller actually needs.
 
-I think what I'll do is Ill make Id and Params a type alias of Value.
-
-And then Wherever neccesary I'll just do checks to make sure that the value is of the correct type.
