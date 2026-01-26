@@ -1,26 +1,25 @@
 package jsonrpc
 
 import (
-	"context"
 	"encoding/json"
 )
 
 type JsonRpcServer interface {
-	ServeJsonRpc(ctx context.Context, req Request) Response
+	ServeJsonRpc(req Request) Response
 	Register(string, any) error
 }
 
-type Server struct {
+type defaultServer struct {
 	methods map[string]funcValue
 }
 
-func NewServer() *Server {
-	return &Server{
+func NewServer() *defaultServer {
+	return &defaultServer{
 		methods: make(map[string]funcValue),
 	}
 }
 
-func (s *Server) Register(method string, fn any) error {
+func (s *defaultServer) Register(method string, fn any) error {
 	fv, err := newFuncValue(fn)
 	if err != nil {
 		return err
@@ -30,7 +29,7 @@ func (s *Server) Register(method string, fn any) error {
 
 }
 
-func (s *Server) ServeJsonRpc(ctx context.Context, req Request) Response {
+func (s *defaultServer) ServeJsonRpc(req Request) Response {
 	respId := req.Id()
 	if respId == nil {
 		respId = NullId()

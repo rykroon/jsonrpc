@@ -1,9 +1,7 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 )
@@ -30,29 +28,13 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// add logic for batched requests.
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	req := &serverRequest{}
-	if err := decoder.Decode(&req); err != nil {
-		var (
-			syntaxErr *json.SyntaxError
-			typeErr   *json.UnmarshalTypeError
-		)
-		if errors.As(err, &syntaxErr) {
-			jsonRpcErr := NewError(ErrorCodeParseError, err.Error(), nil)
-			h.writeResponse(w, NewErrorResponse(jsonRpcErr, NullId()))
-		} else if errors.As(err, &typeErr) {
-			jsonRpcErr := NewError(ErrorCodeInvalidRequest, err.Error(), nil)
-			h.writeResponse(w, NewErrorResponse(jsonRpcErr, NullId()))
-		} else {
-			jsonRpcErr := NewError(ErrorCodeInternalError, err.Error(), nil)
-			h.writeResponse(w, NewErrorResponse(jsonRpcErr, NullId()))
-		}
+	req, err := DefaultRequestdecoder(r.Body)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 
-	resp := h.Server.ServeJsonRpc(r.Context(), req)
+	resp := h.Server.ServeJsonRpc(req)
 	if resp == nil {
 		// a notification
 		w.WriteHeader(http.StatusNoContent)
@@ -73,19 +55,4 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *HttpHandler) writeResponse(w http.ResponseWriter, resp Response) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
-}
-
-func NewHttpRequest(url string, req *Request) (*http.Request, error) {
-	b, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal json: %w", err)
-	}
-
-	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create http request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	return httpReq, nil
 }

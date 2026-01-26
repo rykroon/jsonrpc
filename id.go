@@ -11,48 +11,58 @@ type Id interface {
 	json.Marshaler
 }
 
-type idType struct {
-	value any
+type idString string
+
+func NewIdStr(s string) Id {
+	return idString(s)
 }
 
-func NewId[T string | int](v T) Id {
-	return idType{v}
+func (id idString) String() (string, bool) {
+	return string(id), true
+}
+
+func (id idString) Int() (int, bool) {
+	return 0, false
+}
+
+func (id idString) IsNull() bool {
+	return false
+}
+
+func (id idString) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(id))
+}
+
+type idInt int64
+
+func NewIdInt(i int64) Id {
+	return idInt(i)
+}
+
+func (id idInt) String() (string, bool) {
+	return "", false
+}
+
+func (id idInt) Int() (int, bool) {
+	return int(id), true
+}
+
+func (id idInt) IsNull() bool {
+	return false
+}
+
+func (id idInt) MarshalJSON() ([]byte, error) {
+	return json.Marshal(int(id))
 }
 
 func NullId() Id {
-	return idType{nil}
+	return idRaw("null")
 }
 
-func (id idType) String() (string, bool) {
-	s, ok := id.value.(string)
-	return s, ok
-}
+type idRaw []byte
 
-func (id idType) Int() (int, bool) {
-	i, ok := id.value.(int)
-	return i, ok
-}
-
-func (id idType) IsNull() bool {
-	return id.value == nil
-}
-
-func (id idType) MarshalJSON() ([]byte, error) {
-	return json.Marshal(id.value)
-}
-
-// func (id idType) UnmarshalJSON(data []byte) error {
-// 	if !isJsonInt(data) || !isJsonString(data) || !isJsonNull(data) {
-// 		// return json.UnmarshalTypeError
-// 		return NewError(0, "id must be string, int or null", nil)
-// 	}
-// 	return json.Unmarshal(data, &id.value)
-// }
-
-type rawId []byte
-
-func (id rawId) String() (string, bool) {
-	if value(id).Kind() != 's' {
+func (id idRaw) String() (string, bool) {
+	if jsonValue(id).Kind() != 's' {
 		return "", false
 	}
 	s := ""
@@ -60,8 +70,8 @@ func (id rawId) String() (string, bool) {
 	return s, err == nil
 }
 
-func (id rawId) Int() (int, bool) {
-	if value(id).Kind() != '0' {
+func (id idRaw) Int() (int, bool) {
+	if jsonValue(id).Kind() != '0' {
 		return 0, false
 	}
 	i := 0
@@ -69,18 +79,10 @@ func (id rawId) Int() (int, bool) {
 	return i, err == nil
 }
 
-func (id rawId) IsNull() bool {
-	return value(id).Kind() != 'n'
+func (id idRaw) IsNull() bool {
+	return jsonValue(id).Kind() == 'n'
 }
 
-func (id rawId) MarshalJSON() ([]byte, error) {
+func (id idRaw) MarshalJSON() ([]byte, error) {
 	return id, nil
 }
-
-// func (id *rawId) UnmarshalJSON(data []byte) error {
-// 	if !isJsonInt(data) || !isJsonString(data) || !isJsonNull(data) {
-// 		return NewError(0, "id must be string, int or null", nil)
-// 	}
-// 	*id = data
-// 	return nil
-// }

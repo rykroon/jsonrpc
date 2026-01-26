@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"encoding/json"
+	"io"
 )
 
 type Response interface {
@@ -11,8 +12,30 @@ type Response interface {
 	Id() Id
 }
 
-type ResponseEncoder func(Response) ([]byte, error)
-type ResponseDecoder func([]byte) (Response, error)
+type ResponseEncoder func(Response, io.Writer) error
+
+func DefaultResponseEncoder(resp Response, w io.Writer) error {
+	temp := map[string]any{
+		"jsonrpc": resp.Jsonrpc(),
+		"id":      resp.Id(),
+	}
+	if resp.Error() != nil {
+		temp["error"] = resp.Error()
+	} else {
+		temp["result"] = resp.Result()
+	}
+	dec := json.NewEncoder(w)
+	return dec.Encode(temp)
+}
+
+type ResponseDecoder func(io.Reader) (Response, error)
+
+func DefaultResponseDecoder(r io.Reader) (Response, error) {
+	dec := json.NewDecoder(r)
+	resp := clientResponse{}
+	err := dec.Decode(&resp)
+	return resp, err
+}
 
 type serverResponse struct {
 	id     Id
@@ -94,19 +117,6 @@ func (r clientResponse) Id() Id {
 	if len(r.RawId) == 0 {
 		return nil
 	}
-	id := rawId(r.RawId)
+	id := idRaw(r.RawId)
 	return &id
-}
-
-func DefaultResponseEncoder(resp Response) ([]byte, error) {
-	temp := map[string]any{
-		"jsonrpc": resp.Jsonrpc(),
-		"id":      resp.Id(),
-	}
-	if resp.Error() != nil {
-		temp["error"] = resp.Error()
-	} else {
-		temp["result"] = resp.Result()
-	}
-	return json.Marshal(temp)
 }

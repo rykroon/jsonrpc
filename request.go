@@ -1,6 +1,9 @@
 package jsonrpc
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"io"
+)
 
 type Request interface {
 	Jsonrpc() string
@@ -9,8 +12,36 @@ type Request interface {
 	Id() Id
 }
 
-type RequestEncoder func(req Request) ([]byte, error)
-type RequestDecoder func([]byte) (Request, error)
+type RequestEncoder func(Request, io.Writer) error
+
+func DefaultRequestEncoder(req Request, w io.Writer) error {
+	temp := struct {
+		Jsonrpc string `json:"jsonrpc"`
+		Method  string `json:"method"`
+		Params  Params `json:"params,omitzero"`
+		Id      Id     `json:"id,omitzero"`
+	}{
+		Jsonrpc: req.Jsonrpc(),
+		Method:  req.Method(),
+		Params:  req.Params(),
+		Id:      req.Id(),
+	}
+	enc := json.NewEncoder(w)
+	return enc.Encode(temp)
+}
+
+type RequestDecoder func(io.Reader) (Request, error)
+
+func DefaultRequestdecoder(r io.Reader) (Request, error) {
+	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
+	req := serverRequest{}
+	err := dec.Decode(&req)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
 
 type clientRequest struct {
 	method string
@@ -75,7 +106,7 @@ func (r serverRequest) Id() Id {
 	if len(r.RawId) == 0 {
 		return nil
 	}
-	id := rawId(r.RawId)
+	id := idRaw(r.RawId)
 	return &id
 }
 
@@ -83,21 +114,6 @@ func (r serverRequest) Params() Params {
 	if len(r.RawParams) == 0 {
 		return nil
 	}
-	params := rawParams(r.RawParams)
+	params := paramsRaw(r.RawParams)
 	return &params
-}
-
-func DefaultRequestEncoder(req Request) ([]byte, error) {
-	temp := struct {
-		Jsonrpc string `json:"jsonrpc"`
-		Method  string `json:"method"`
-		Params  Params `json:"params,omitzero"`
-		Id      Id     `json:"id,omitzero"`
-	}{
-		Jsonrpc: req.Jsonrpc(),
-		Method:  req.Method(),
-		Params:  req.Params(),
-		Id:      req.Id(),
-	}
-	return json.Marshal(temp)
 }

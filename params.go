@@ -2,12 +2,8 @@ package jsonrpc
 
 import (
 	"encoding/json"
+	"errors"
 )
-
-// IDEA: perhaps the interfaces should only implement json.Marshaler
-// and not json.Unmarshaler. It makes sense that all jsonrpc interfaces
-// should be able to serialize to json, but depending on the underlying
-// implementation it may not make sense for it to be parsed from json.
 
 type Params interface {
 	ByPosition() bool
@@ -18,43 +14,70 @@ type Params interface {
 	json.Marshaler
 }
 
-type rawParams []byte
+type paramsRaw []byte
 
-func (p rawParams) ByPosition() bool {
+func (p paramsRaw) ByPosition() bool {
 	return jsonValue(p).Kind() == '['
 }
 
-func (p rawParams) ByName() bool {
+func (p paramsRaw) ByName() bool {
 	return jsonValue(p).Kind() == '{'
 }
 
-func (p rawParams) DecodeInto(v any) error {
+func (p paramsRaw) DecodeInto(v any) error {
 	return json.Unmarshal(p, v)
 }
 
-func (p rawParams) Get(key string) (any, bool) {
+func (p paramsRaw) Get(key string) (any, bool) {
 	if !p.ByName() {
 		return nil, false
 	}
-	// do later
+	for k, v := range IterJsonObject(p) {
+		if k == key {
+			var result any
+			err := json.Unmarshal(v, &result)
+			if err != nil {
+				return nil, false
+			}
+			return result, true
+		}
+	}
 	return nil, false
 }
 
-func (p rawParams) At(idx int) (any, bool) {
+func (p paramsRaw) At(idx int) (any, bool) {
 	if !p.ByPosition() {
 		return nil, false
 	}
-	// do later
+	for i, v := range IterJsonArray(p) {
+		if i == idx {
+			var result any
+			err := json.Unmarshal(v, &result)
+			if err != nil {
+				return nil, false
+			}
+			return result, true
+		}
+	}
 	return nil, false
 }
 
-func (p rawParams) MarshalJSON() ([]byte, error) {
+func (p paramsRaw) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]byte(p))
+}
+
+func (p *paramsRaw) UnmarshalJSON(data []byte) error {
+	jv := jsonValue(data)
+	if jv.Kind() != '{' && jv.Kind() != '[' {
+		return errors.New("invalid type for params")
+	}
+	*p = data
+	return nil
 }
 
 type mapParams[T any] map[string]T
 
-func NewParamFromMap[T any](m map[string]T) Params {
+func NewParamsMap[T any](m map[string]T) Params {
 	return mapParams[T](m)
 }
 
@@ -93,7 +116,7 @@ func (p mapParams[T]) MarshalJSON() ([]byte, error) {
 type sliceParams[T any] []T
 
 // NewPositionalParams() ??? make variadic???
-func NewParamFromSlice[T any](s []T) Params {
+func NewParamsSlice[T any](s []T) Params {
 	return sliceParams[T](s)
 }
 

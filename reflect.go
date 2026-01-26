@@ -26,6 +26,8 @@ func newFuncValue(fn any) (funcValue, error) {
 }
 
 func (v funcValue) NewArgs() reflect.Value {
+	// add logic so that if there are multiple args, then return a reflect.Value
+	// that represents a slice
 	t := reflect.Value(v).Type()
 	argType := t.In(0)
 	return reflect.New(argType)

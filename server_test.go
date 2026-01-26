@@ -17,7 +17,7 @@ func TestJsonRpcServer(t *testing.T) {
 		return params.Echo, nil
 	})
 
-	params := NewParamFromMap(map[string]string{"echo": "echo"})
+	params := NewParamsMap(map[string]string{"echo": "echo"})
 
 	tests := []struct {
 		name     string
@@ -26,14 +26,14 @@ func TestJsonRpcServer(t *testing.T) {
 	}{
 		{
 			"test_1",
-			NewRequest("echo", params, NewId(123)),
-			NewSuccessResponse("echo", NewId(123)),
+			NewRequest("echo", params, NewIdInt(123)),
+			NewSuccessResponse("echo", NewIdInt(123)),
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := server.ServeJsonRpc(t.Context(), tc.in)
+			actual := server.ServeJsonRpc(tc.in)
 			require.Equal(t, actual, tc.expected)
 		})
 	}
