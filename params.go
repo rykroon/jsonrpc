@@ -9,8 +9,6 @@ type Params interface {
 	ByPosition() bool
 	ByName() bool
 	DecodeInto(any) error
-	Get(string) (any, bool)
-	At(int) (any, bool)
 	json.Marshaler
 }
 
@@ -26,40 +24,6 @@ func (p paramsRaw) ByName() bool {
 
 func (p paramsRaw) DecodeInto(v any) error {
 	return json.Unmarshal(p, v)
-}
-
-func (p paramsRaw) Get(key string) (any, bool) {
-	if !p.ByName() {
-		return nil, false
-	}
-	for k, v := range IterJsonObject(p) {
-		if k == key {
-			var result any
-			err := json.Unmarshal(v, &result)
-			if err != nil {
-				return nil, false
-			}
-			return result, true
-		}
-	}
-	return nil, false
-}
-
-func (p paramsRaw) At(idx int) (any, bool) {
-	if !p.ByPosition() {
-		return nil, false
-	}
-	for i, v := range IterJsonArray(p) {
-		if i == idx {
-			var result any
-			err := json.Unmarshal(v, &result)
-			if err != nil {
-				return nil, false
-			}
-			return result, true
-		}
-	}
-	return nil, false
 }
 
 func (p paramsRaw) MarshalJSON() ([]byte, error) {
@@ -97,18 +61,6 @@ func (p mapParams[T]) DecodeInto(v any) error {
 	return json.Unmarshal(b, v)
 }
 
-func (p mapParams[T]) Get(key string) (any, bool) {
-	value, ok := p[key]
-	if !ok {
-		return nil, false
-	}
-	return value, true
-}
-
-func (p mapParams[T]) At(idx int) (any, bool) {
-	return nil, false
-}
-
 func (p mapParams[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]T(p))
 }
@@ -134,17 +86,6 @@ func (p sliceParams[T]) DecodeInto(v any) error {
 		return err
 	}
 	return json.Unmarshal(b, v)
-}
-
-func (p sliceParams[T]) Get(key string) (any, bool) {
-	return nil, false
-}
-
-func (p sliceParams[T]) At(idx int) (any, bool) {
-	if idx < 0 || idx >= len(p) {
-		return nil, false
-	}
-	return p[idx], true
 }
 
 func (p sliceParams[T]) MarshalJSON() ([]byte, error) {
