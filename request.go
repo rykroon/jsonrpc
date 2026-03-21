@@ -114,6 +114,6 @@ func (r serverRequest) Params() Params {
 	if len(r.RawParams) == 0 {
 		return nil
 	}
-	params := paramsRaw(r.RawParams)
+	params := params(r.RawParams)
 	return &params
 }

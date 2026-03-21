@@ -12,82 +12,43 @@ type Params interface {
 	json.Marshaler
 }
 
-type paramsRaw []byte
+type params []byte
 
-func (p paramsRaw) ByPosition() bool {
-	return jsonValue(p).Kind() == '['
+func NewParams(v any) (Params, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	jv := jsonValue(data)
+	if jv.Kind().normalize() != '{' && jv.Kind().normalize() != '[' {
+		return nil, errors.New("must be a valid json object or array")
+	}
+	return params(data), nil
 }
 
-func (p paramsRaw) ByName() bool {
-	return jsonValue(p).Kind() == '{'
+func (p params) ByPosition() bool {
+	jv := jsonValue(p)
+	return jv.Kind().normalize() == '['
 }
 
-func (p paramsRaw) DecodeInto(v any) error {
+func (p params) ByName() bool {
+	jv := jsonValue(p)
+	return jv.Kind().normalize() == '{'
+}
+
+func (p params) DecodeInto(v any) error {
 	return json.Unmarshal(p, v)
 }
 
-func (p paramsRaw) MarshalJSON() ([]byte, error) {
+func (p params) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]byte(p))
 }
 
-func (p *paramsRaw) UnmarshalJSON(data []byte) error {
+func (p *params) UnmarshalJSON(data []byte) error {
 	jv := jsonValue(data)
-	if jv.Kind() != '{' && jv.Kind() != '[' {
+	if jv.Kind().normalize() != '{' && jv.Kind().normalize() != '[' {
 		return errors.New("invalid type for params")
 	}
-	*p = data
+	*p = params(jv.Clone())
 	return nil
-}
-
-type mapParams[T any] map[string]T
-
-func NewParamsMap[T any](m map[string]T) Params {
-	return mapParams[T](m)
-}
-
-func (p mapParams[T]) ByPosition() bool {
-	return false
-}
-
-func (p mapParams[T]) ByName() bool {
-	return true
-}
-
-func (p mapParams[T]) DecodeInto(v any) error {
-	b, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
-}
-
-func (p mapParams[T]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]T(p))
-}
-
-type sliceParams[T any] []T
-
-// NewPositionalParams() ??? make variadic???
-func NewParamsSlice[T any](s []T) Params {
-	return sliceParams[T](s)
-}
-
-func (p sliceParams[T]) ByPosition() bool {
-	return true
-}
-
-func (p sliceParams[T]) ByName() bool {
-	return false
-}
-
-func (p sliceParams[T]) DecodeInto(v any) error {
-	b, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
-}
-
-func (p sliceParams[T]) MarshalJSON() ([]byte, error) {
-	return json.Marshal([]T(p))
 }

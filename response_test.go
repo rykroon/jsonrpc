@@ -7,8 +7,8 @@ import (
 )
 
 func TestResponse(t *testing.T) {
-	resp := NewSuccessResponse(100, NewIdInt(123))
+	resp := NewSuccessResponse(100, NewId(123))
 	require.Equal(t, resp.Jsonrpc(), "2.0")
-	require.Equal(t, resp.Id(), NewIdInt(123))
+	require.Equal(t, resp.Id(), NewId(123))
 	require.Equal(t, resp.Result(), 100)
 }

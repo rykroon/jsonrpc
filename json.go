@@ -2,10 +2,7 @@ package jsonrpc
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
-	"iter"
 	"strconv"
 )
 
@@ -118,74 +115,4 @@ func (k kind) normalize() kind {
 		return '0'
 	}
 	return k
-}
-
-func IterJsonObject(data []byte) iter.Seq2[string, json.RawMessage] {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	return func(yield func(key string, value json.RawMessage) bool) {
-		tk, err := dec.Token()
-		if err != nil {
-			return
-		}
-		delim, ok := tk.(json.Delim)
-		if !ok || delim != '{' {
-			return
-		}
-
-		for dec.More() {
-			tk, err := dec.Token()
-			if err != nil {
-				return
-			}
-
-			key, ok := tk.(string)
-			if !ok {
-				return
-			}
-
-			value := json.RawMessage{}
-			err = dec.Decode(&value)
-			if err != nil {
-				return
-			}
-
-			if !yield(key, value) {
-				return
-			}
-		}
-	}
-}
-
-func IterJsonArray(data []byte) iter.Seq2[int, json.RawMessage] {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	return func(yield func(idx int, value json.RawMessage) bool) {
-		tk, err := dec.Token()
-		if err != nil {
-			if err == io.EOF {
-				return // do not handle as error
-			}
-			return // handle as error
-		}
-		delim, ok := tk.(json.Delim)
-		if !ok || delim != '[' {
-			return
-		}
-
-		idx := 0
-
-		for dec.More() {
-			value := json.RawMessage{}
-			err = dec.Decode(&value)
-			if err != nil {
-				return
-			}
-
-			if !yield(idx, value) {
-				return
-			}
-			idx += 1
-		}
-	}
 }
