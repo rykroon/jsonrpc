@@ -39,3 +39,12 @@ func (e *Error) WithData(data any) *Error {
 	e.Data = b
 	return e
 }
+
+// UnmarshalData decodes the Error's Data field into into. If Data is empty
+// (no data attached) it is a no-op and returns nil.
+func (e *Error) UnmarshalData(into any) error {
+	if len(e.Data) == 0 {
+		return nil
+	}
+	return json.Unmarshal(e.Data, into)
+}
