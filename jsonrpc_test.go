@@ -134,6 +134,71 @@ func TestResponseAlwaysHasID(t *testing.T) {
 	require.Contains(t, string(b), `"id":null`)
 }
 
+func TestHandleMessageSingleRequest(t *testing.T) {
+	s := newTestServer(t)
+	data := []byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`)
+	out, err := HandleMessage(context.Background(), data, s.Serve)
+	require.NoError(t, err)
+
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.Nil(t, resp.Error)
+	require.JSONEq(t, `{"sum":3}`, string(resp.Result))
+	require.JSONEq(t, "1", string(resp.ID))
+}
+
+func TestHandleMessageNotification(t *testing.T) {
+	s := NewServer()
+	called := make(chan struct{}, 1)
+	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
+		called <- struct{}{}
+		return struct{}{}, nil
+	})
+	data := []byte(`{"jsonrpc":"2.0","method":"ping"}`)
+	out, err := HandleMessage(context.Background(), data, s.Serve)
+	require.NoError(t, err)
+	require.Nil(t, out)
+	<-called
+}
+
+func TestHandleMessageParseError(t *testing.T) {
+	s := newTestServer(t)
+	data := []byte(`{not valid json`)
+	out, err := HandleMessage(context.Background(), data, s.Serve)
+	require.NoError(t, err)
+
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeParseError, resp.Error.Code)
+	require.JSONEq(t, "null", string(resp.ID))
+}
+
+func TestHandleMessageBatchRejected(t *testing.T) {
+	s := newTestServer(t)
+	data := []byte(` [{"jsonrpc":"2.0","method":"add","id":1}]`)
+	out, err := HandleMessage(context.Background(), data, s.Serve)
+	require.NoError(t, err)
+
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+	require.Contains(t, resp.Error.Message, "batch")
+}
+
+func TestHandleMessageInvalidShape(t *testing.T) {
+	s := newTestServer(t)
+	data := []byte(`12345`)
+	out, err := HandleMessage(context.Background(), data, s.Serve)
+	require.NoError(t, err)
+
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+}
+
 func TestParamsAsRawMessagePassThrough(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(InProcess(s))
