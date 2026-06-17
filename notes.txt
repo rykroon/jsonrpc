@@ -1,7 +1,102 @@
-I generally like the idea of having most things an interface.
-However I think I went overboard with some of the interfaces.
+Message layer (deferred — write when adding first byte-based transport)
 
-especially with params.
-chatgpt says keep interfaces small 1-3 methods.
-only focus on what the caller actually needs.
+There's a pre-server pipeline that every byte-based transport (HTTP,
+WebSocket, stdio, TCP) needs and that in-process skips:
 
+  bytes -> parse JSON -> detect single vs batch -> dispatch each -> aggregate -> marshal
+
+The right tool is probably one free function:
+
+  func HandleMessage(
+      ctx context.Context,
+      data []byte,
+      fn func(context.Context, *Request) *Response,
+  ) ([]byte, error)
+
+Behavior:
+  - peek first non-space byte of data
+  - '[' -> decode as []Request, call fn per element, collect non-nil
+    Responses, marshal as array
+  - '{' -> decode as Request, call fn once, marshal Response
+  - bad JSON / anything else -> marshal a single CodeParseError Response
+    with "id": null
+  - all-notifications batch -> return (nil, nil) per spec
+  - notification (single) -> return (nil, nil)
+
+Why this shape:
+  - Free function, not a Server method. The pre-server work is genuinely
+    above Server in the stack; making the dispatcher a parameter makes the
+    layering explicit and keeps Server focused on single-request dispatch.
+  - Takes a func, not an interface. Mirrors Sender on the client side.
+    (*Server).Serve already matches the signature; wrapping for auth,
+    logging, ctx adjustments, etc. is trivial.
+  - The escape hatch is implicit. Transports that want full control
+    (e.g. HTTP that wants HTTP 400 on parse failure instead of an in-band
+    CodeParseError) skip HandleMessage and parse/loop themselves using
+    Server.Serve. Same convenience/primitive pairing as
+    Register / RegisterHandler.
+
+Bundled with batch support. HandleMessage and batch are really one
+decision — the shape of the function is determined by whether it returns
+one Response, a batch, or "either depending on input." Can't add
+HandleMessage cleanly without picking, and batch handling is most of the
+body anyway.
+
+Not addressed:
+  - Batch-level observability (e.g. "log batch size on receipt"). If
+    needed, either add a HandleMessageWith(...opts) variant or the
+    transport writes its own loop using Server.Serve. Don't pre-solve.
+  - Streaming/keepalive concerns for long-lived transports — those live
+    in the transport adapter, not here.
+
+Usage sketch:
+
+  // HTTP adapter, batch-supporting
+  out, _ := jsonrpc.HandleMessage(r.Context(), body, h.server.Serve)
+  if out == nil { w.WriteHeader(http.StatusNoContent); return }
+  w.Write(out)
+
+  // stdio loop
+  for {
+      msg := readFrame(stdin)
+      out, _ := jsonrpc.HandleMessage(ctx, msg, server.Serve)
+      if out != nil { writeFrame(stdout, out) }
+  }
+
+  // HTTP adapter, no batch, wants HTTP 400 on parse failure
+  // -- skips HandleMessage. Decodes Request directly, calls Serve.
+
+
+---
+
+Parse errors and layering
+
+JSON-RPC's CodeParseError isn't universally right — it's a layering
+mistake for transports that have native error signaling (HTTP -> 400) and
+the correct answer for transports that don't (stdio, TCP stream, single
+WebSocket frame in a long-lived connection). Don't centralize parse-error
+response generation at the Server level. Each transport adapter chooses
+its idiom: HTTP returns 400, stream transports use HandleMessage's
+in-band CodeParseError.
+
+In-process can't produce parse errors structurally — Requests are
+constructed as Go values.
+
+
+---
+
+Sender / Transport asymmetry
+
+Sender (client side) = the transport. Same function on both sides of any
+real wire. In-process is the degenerate case: a direct function call,
+exposed via InProcess(s).
+
+Server side has no symmetric single-interface "ServerTransport" because
+transport shapes diverge: HTTP is a one-shot handler, stdio/TCP/WebSocket
+is a long-lived loop, in-process is nothing. net/rpc's codec picked the
+streaming shape and that's why net/rpc/jsonrpc is incomplete (no real
+notifications, no batch, no error.data).
+
+If a common server-transport shape ever emerges from writing real
+adapters, name it then. Until then: each transport adapter is its own
+shape and calls Serve / HandleMessage as appropriate.
