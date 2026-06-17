@@ -6,81 +6,36 @@ import (
 )
 
 const (
-	ErrorCodeParseError     = -32700
-	ErrorCodeInvalidRequest = -32600
-	ErrorCodeMethodNotFound = -32601
-	ErrorCodeInvalidParams  = -32602
-	ErrorCodeInternalError  = -32603
-	ErrorCodeServerError    = -32000
+	CodeParseError     = -32700
+	CodeInvalidRequest = -32600
+	CodeMethodNotFound = -32601
+	CodeInvalidParams  = -32602
+	CodeInternalError  = -32603
 )
 
-type Error interface {
-	error
-	Code() int
-	Message() string
-	Data() any
+// Error is the JSON-RPC error object. Data is optional; when present it holds
+// raw JSON so the caller can decode it into whatever shape they expect.
+type Error struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
-type serverError struct {
-	code    int
-	message string
-	data    any
+func (e *Error) Error() string {
+	return fmt.Sprintf("jsonrpc: %d %s", e.Code, e.Message)
 }
 
-// returns a new error
-func NewError(code int, message string, data any) Error {
-	return serverError{code, message, data}
+func NewError(code int, message string) *Error {
+	return &Error{Code: code, Message: message}
 }
 
-func (e serverError) Code() int {
-	return e.code
-}
-
-func (e serverError) Message() string {
-	return e.message
-}
-
-func (e serverError) Data() any {
-	return e.data
-}
-
-func (e serverError) Error() string {
-	return fmt.Sprintf("Code=%d, Message=%s, Data=%v", e.Code(), e.Message(), e.Data())
-}
-
-type clientError struct {
-	RawCode    json.RawMessage `json:"code"`
-	RawMessage json.RawMessage `json:"message"`
-	RawData    json.RawMessage `json:"data"`
-}
-
-func (e clientError) Code() int {
-	code := 0
-	err := json.Unmarshal(e.RawCode, &code)
+// WithData attaches data as the Error's Data field. It panics if data cannot
+// be JSON-marshaled, since that indicates a programmer error at the call site.
+func (e *Error) WithData(data any) *Error {
+	b, err := json.Marshal(data)
 	if err != nil {
-		return 0
+		panic(fmt.Sprintf("jsonrpc: marshal error data: %v", err))
 	}
-	return code
-}
-
-func (e clientError) Message() string {
-	message := ""
-	err := json.Unmarshal(e.RawCode, &message)
-	if err != nil {
-		return ""
-	}
-	return message
-}
-
-func (e clientError) Data() any {
-	var data any
-	err := json.Unmarshal(e.RawCode, &data) // will this work?
-	if err != nil {
-		return 0
-	}
-	return data
-}
-
-func (e clientError) Error() string {
-	return fmt.Sprintf("Code=%d, Message=%s, Data=%v", e.Code(), e.Message(), e.Data())
+	e.Data = b
+	return e
 }
