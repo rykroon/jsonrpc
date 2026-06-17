@@ -1,5 +1,3 @@
-// Package jsonrpc implements JSON-RPC 2.0 request/response types and an
-// in-process dispatcher. Transport is left to the caller.
 package jsonrpc
 
 import "encoding/json"
