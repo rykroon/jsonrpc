@@ -3,7 +3,6 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 )
@@ -68,32 +67,4 @@ func errorResponse(id json.RawMessage, e *Error) *Response {
 		id = json.RawMessage("null")
 	}
 	return &Response{JSONRPC: Version, Error: e, ID: id}
-}
-
-// Register adapts a typed function into a Handler and installs it on s.
-// Params are JSON-unmarshaled into a fresh P; the result is JSON-marshaled.
-// If fn returns an error that unwraps to *jsonrpc.Error it is returned as-is;
-// any other error becomes CodeInternalError.
-func Register[P, R any](s *Server, name string, fn func(context.Context, P) (R, error)) {
-	s.RegisterHandler(name, func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
-		var p P
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &p); err != nil {
-				return nil, NewError(CodeInvalidParams, err.Error())
-			}
-		}
-		r, err := fn(ctx, p)
-		if err != nil {
-			var rpcErr *Error
-			if errors.As(err, &rpcErr) {
-				return nil, rpcErr
-			}
-			return nil, NewError(CodeInternalError, err.Error())
-		}
-		out, mErr := json.Marshal(r)
-		if mErr != nil {
-			return nil, NewError(CodeInternalError, mErr.Error())
-		}
-		return out, nil
-	})
 }
