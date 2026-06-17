@@ -35,7 +35,7 @@ func newTestServer(t *testing.T) *Server {
 
 func TestClientCall(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(s.Serve)
+	c := NewClient(InProcess(s))
 
 	var got addResult
 	err := c.Call(context.Background(), "add", addParams{A: 2, B: 3}, &got)
@@ -45,7 +45,7 @@ func TestClientCall(t *testing.T) {
 
 func TestClientCallRPCError(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(s.Serve)
+	c := NewClient(InProcess(s))
 
 	err := c.Call(context.Background(), "fail", struct{}{}, nil)
 	var rpcErr *Error
@@ -57,7 +57,7 @@ func TestClientCallRPCError(t *testing.T) {
 
 func TestClientCallInternalError(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(s.Serve)
+	c := NewClient(InProcess(s))
 
 	err := c.Call(context.Background(), "boom", struct{}{}, nil)
 	var rpcErr *Error
@@ -67,7 +67,7 @@ func TestClientCallInternalError(t *testing.T) {
 
 func TestMethodNotFound(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(s.Serve)
+	c := NewClient(InProcess(s))
 
 	err := c.Call(context.Background(), "missing", nil, nil)
 	var rpcErr *Error
@@ -136,7 +136,7 @@ func TestResponseAlwaysHasID(t *testing.T) {
 
 func TestParamsAsRawMessagePassThrough(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(s.Serve)
+	c := NewClient(InProcess(s))
 
 	var got addResult
 	err := c.Call(context.Background(), "add", json.RawMessage(`{"a":7,"b":8}`), &got)
