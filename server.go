@@ -35,6 +35,9 @@ func (s *Server) RegisterHandler(name string, h Handler) {
 
 // Serve dispatches a single request. For notifications the returned
 // *Response is nil — the handler still runs, but no reply is produced.
+//
+// Serve does not recover from panics in registered handlers. If your
+// transport requires recovery, wrap Serve.
 func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	if req.JSONRPC != Version {
 		return errorResponse(req.ID, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`))
