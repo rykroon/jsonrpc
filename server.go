@@ -1,16 +1,31 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 )
 
-// Handler is the low-level dispatch signature. It receives the raw params
+// Handler is the low-level dispatch contract. It receives the raw params
 // bytes (possibly empty) and returns either result bytes or an *Error.
 // A nil result with a nil error is valid and encodes as `"result":null`.
-type Handler func(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error)
+//
+// Implement Handler on a struct when the handler carries state (e.g. a
+// compiled JSON schema, a rate limiter, a cache). For a plain function,
+// use HandlerFunc.
+type Handler interface {
+	Handle(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error)
+}
+
+// HandlerFunc adapts a plain function into a Handler. The pattern mirrors
+// net/http's Handler / HandlerFunc.
+type HandlerFunc func(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error)
+
+func (f HandlerFunc) Handle(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error) {
+	return f(ctx, params)
+}
 
 // Server is a registry of JSON-RPC methods that dispatches requests to them.
 type Server struct {
@@ -44,6 +59,9 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	if req.Method == "" {
 		return errorResponse(req.ID, NewError(CodeInvalidRequest, "missing method"))
 	}
+	if !req.IsNotification() && !isValidID(req.ID) {
+		return errorResponse(nil, NewError(CodeInvalidRequest, "id must be a string or integer"))
+	}
 
 	s.mu.RLock()
 	h, ok := s.methods[req.Method]
@@ -52,7 +70,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		return errorResponse(req.ID, NewError(CodeMethodNotFound, "method not found: "+req.Method))
 	}
 
-	result, rpcErr := h(ctx, req.Params)
+	result, rpcErr := h.Handle(ctx, req.Params)
 	if req.IsNotification() {
 		return nil
 	}
@@ -67,4 +85,34 @@ func errorResponse(id json.RawMessage, e *Error) *Response {
 		id = json.RawMessage("null")
 	}
 	return &Response{JSONRPC: Version, Error: e, ID: id}
+}
+
+// isValidID reports whether id is a JSON string or integer literal. JSON
+// null, floats, bools, objects, and arrays are rejected. An empty id is
+// also rejected — callers should check req.IsNotification() before calling
+// this.
+//
+// Assumes id is well-formed JSON (which it is when sourced from json.Unmarshal).
+// We're recognizing the token shape, not parsing the value.
+func isValidID(id json.RawMessage) bool {
+	id = bytes.TrimSpace(id)
+	if len(id) == 0 {
+		return false
+	}
+	if id[0] == '"' {
+		return true
+	}
+	start := 0
+	if id[0] == '-' {
+		start = 1
+	}
+	if start == len(id) {
+		return false
+	}
+	for i := start; i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return false
+		}
+	}
+	return true
 }

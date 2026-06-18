@@ -55,9 +55,9 @@ func Dispatch[P, R any](
 }
 
 // Register adapts a typed function into a Handler and installs it on s.
-// Equivalent to s.RegisterHandler(name, func(ctx, raw) { return Dispatch(ctx, raw, fn) }).
+// Equivalent to s.RegisterHandler(name, HandlerFunc(func(ctx, raw) { return Dispatch(ctx, raw, fn) })).
 func Register[P, R any](s *Server, name string, fn func(context.Context, P) (R, error)) {
-	s.RegisterHandler(name, func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+	s.RegisterHandler(name, HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 		return Dispatch(ctx, raw, fn)
-	})
+	}))
 }

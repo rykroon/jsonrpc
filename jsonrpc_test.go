@@ -284,10 +284,10 @@ func TestServerAcceptsValidIDs(t *testing.T) {
 func TestSendPropagatesCallerID(t *testing.T) {
 	s := newTestServer(t)
 	var seen json.RawMessage
-	c := NewClient(func(ctx context.Context, req *Request) (*Response, error) {
+	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
 		seen = append(seen[:0], req.ID...)
 		return s.Serve(ctx, req), nil
-	})
+	}))
 
 	req := NewRequest("add", mustParams(t, addParams{A: 1, B: 2}), NewID("req-abc"))
 	resp, err := c.Send(context.Background(), req)
@@ -329,14 +329,14 @@ func TestDispatchWithCustomValidator(t *testing.T) {
 		}
 		return nil
 	}
-	s.RegisterHandler("add", func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+	s.RegisterHandler("add", HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 		if vErr := requirePositive(raw); vErr != nil {
 			return nil, vErr
 		}
 		return Dispatch(ctx, raw, func(_ context.Context, p addParams) (addResult, error) {
 			return addResult{Sum: p.A + p.B}, nil
 		})
-	})
+	}))
 
 	c := NewClient(InProcess(s))
 
