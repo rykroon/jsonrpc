@@ -30,3 +30,46 @@ type Response struct {
 	Error   *Error          `json:"error,omitempty"`
 	ID      json.RawMessage `json:"id"`
 }
+
+// Decode unmarshals r.Result into into. It is a no-op when into is nil or
+// Result is empty. Callers should check r.Error before calling Decode.
+func (r *Response) Decode(into any) error {
+	if into == nil || len(r.Result) == 0 {
+		return nil
+	}
+	return json.Unmarshal(r.Result, into)
+}
+
+// NewRequest assembles a Request with the given method, params, and id. To
+// build a notification (no id, no response expected), use NewNotification.
+// Params and id are raw JSON; use NewParams and NewID to build them from
+// Go values.
+func NewRequest(method string, params, id json.RawMessage) *Request {
+	return &Request{JSONRPC: Version, Method: method, Params: params, ID: id}
+}
+
+// NewNotification assembles a Request without an id. The server dispatches
+// the method but produces no response.
+func NewNotification(method string, params json.RawMessage) *Request {
+	return &Request{JSONRPC: Version, Method: method, Params: params}
+}
+
+// NewID returns the JSON encoding of v for use as Request.ID. The type
+// constraint matches the spec-allowed id shapes (string or integer). For
+// other types, marshal directly with json.Marshal.
+func NewID[T ~string | ~int | ~int64 | ~uint64](v T) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+// NewParams marshals v into JSON for use as Request.Params. A nil v returns
+// nil. A json.RawMessage is returned unchanged.
+func NewParams(v any) (json.RawMessage, error) {
+	if v == nil {
+		return nil, nil
+	}
+	if raw, ok := v.(json.RawMessage); ok {
+		return raw, nil
+	}
+	return json.Marshal(v)
+}

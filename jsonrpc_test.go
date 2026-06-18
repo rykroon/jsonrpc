@@ -33,46 +33,60 @@ func newTestServer(t *testing.T) *Server {
 	return s
 }
 
-func TestClientCall(t *testing.T) {
+func mustParams(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	p, err := NewParams(v)
+	require.NoError(t, err)
+	return p
+}
+
+func TestClientSend(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(InProcess(s))
 
-	var got addResult
-	err := c.Call(context.Background(), "add", addParams{A: 2, B: 3}, &got)
+	req := NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1))
+	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
+	require.Nil(t, resp.Error)
+
+	var got addResult
+	require.NoError(t, resp.Decode(&got))
 	require.Equal(t, addResult{Sum: 5}, got)
 }
 
-func TestClientCallRPCError(t *testing.T) {
+func TestClientSendRPCError(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(InProcess(s))
 
-	err := c.Call(context.Background(), "fail", struct{}{}, nil)
-	var rpcErr *Error
-	require.ErrorAs(t, err, &rpcErr)
-	require.Equal(t, -32001, rpcErr.Code)
-	require.Equal(t, "custom", rpcErr.Message)
-	require.JSONEq(t, `{"x":1}`, string(rpcErr.Data))
+	req := NewRequest("fail", mustParams(t, struct{}{}), NewID(1))
+	resp, err := c.Send(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Error)
+	require.Equal(t, -32001, resp.Error.Code)
+	require.Equal(t, "custom", resp.Error.Message)
+	require.JSONEq(t, `{"x":1}`, string(resp.Error.Data))
 }
 
-func TestClientCallInternalError(t *testing.T) {
+func TestClientSendInternalError(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(InProcess(s))
 
-	err := c.Call(context.Background(), "boom", struct{}{}, nil)
-	var rpcErr *Error
-	require.ErrorAs(t, err, &rpcErr)
-	require.Equal(t, CodeInternalError, rpcErr.Code)
+	req := NewRequest("boom", mustParams(t, struct{}{}), NewID(1))
+	resp, err := c.Send(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeInternalError, resp.Error.Code)
 }
 
 func TestMethodNotFound(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(InProcess(s))
 
-	err := c.Call(context.Background(), "missing", nil, nil)
-	var rpcErr *Error
-	require.ErrorAs(t, err, &rpcErr)
-	require.Equal(t, CodeMethodNotFound, rpcErr.Code)
+	req := NewRequest("missing", nil, NewID(1))
+	resp, err := c.Send(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeMethodNotFound, resp.Error.Code)
 }
 
 func TestNotificationProducesNoResponse(t *testing.T) {
@@ -83,10 +97,22 @@ func TestNotificationProducesNoResponse(t *testing.T) {
 		return struct{}{}, nil
 	})
 
-	resp := s.Serve(context.Background(), &Request{
-		JSONRPC: Version,
-		Method:  "ping",
+	resp := s.Serve(context.Background(), NewNotification("ping", nil))
+	require.Nil(t, resp)
+	<-called
+}
+
+func TestClientNotify(t *testing.T) {
+	s := NewServer()
+	called := make(chan struct{}, 1)
+	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
+		called <- struct{}{}
+		return struct{}{}, nil
 	})
+	c := NewClient(InProcess(s))
+
+	resp, err := c.Send(context.Background(), NewNotification("ping", nil))
+	require.NoError(t, err)
 	require.Nil(t, resp)
 	<-called
 }
@@ -96,7 +122,7 @@ func TestInvalidJSONRPCVersion(t *testing.T) {
 	resp := s.Serve(context.Background(), &Request{
 		JSONRPC: "1.0",
 		Method:  "anything",
-		ID:      json.RawMessage("1"),
+		ID:      NewID(1),
 	})
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
@@ -105,11 +131,7 @@ func TestInvalidJSONRPCVersion(t *testing.T) {
 }
 
 func TestRequestRoundTripPreservesStringID(t *testing.T) {
-	in := &Request{
-		JSONRPC: Version,
-		Method:  "x",
-		ID:      json.RawMessage(`"abc"`),
-	}
+	in := NewRequest("x", nil, NewID("abc"))
 	b, err := json.Marshal(in)
 	require.NoError(t, err)
 
@@ -120,7 +142,7 @@ func TestRequestRoundTripPreservesStringID(t *testing.T) {
 }
 
 func TestRequestNotificationHasNoIDField(t *testing.T) {
-	req := &Request{JSONRPC: Version, Method: "x"}
+	req := NewNotification("x", nil)
 	b, err := json.Marshal(req)
 	require.NoError(t, err)
 	require.NotContains(t, string(b), `"id"`)
@@ -199,6 +221,100 @@ func TestHandleMessageInvalidShape(t *testing.T) {
 	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
 }
 
+func TestServerRejectsInvalidIDs(t *testing.T) {
+	s := newTestServer(t)
+
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"float", "1.5"},
+		{"exponential", "1e2"},
+		{"null", "null"},
+		{"bool", "true"},
+		{"object", `{"x":1}`},
+		{"array", "[1,2,3]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := s.Serve(context.Background(), &Request{
+				JSONRPC: Version,
+				Method:  "add",
+				Params:  json.RawMessage(`{"a":1,"b":2}`),
+				ID:      json.RawMessage(tc.id),
+			})
+			require.NotNil(t, resp)
+			require.NotNil(t, resp.Error)
+			require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+			require.Contains(t, resp.Error.Message, "id")
+			require.JSONEq(t, "null", string(resp.ID))
+		})
+	}
+}
+
+func TestServerAcceptsValidIDs(t *testing.T) {
+	s := newTestServer(t)
+
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"positive int", "42"},
+		{"negative int", "-7"},
+		{"zero", "0"},
+		{"string", `"abc"`},
+		{"empty string", `""`},
+		{"large uint64", "18446744073709551615"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := s.Serve(context.Background(), &Request{
+				JSONRPC: Version,
+				Method:  "add",
+				Params:  json.RawMessage(`{"a":1,"b":2}`),
+				ID:      json.RawMessage(tc.id),
+			})
+			require.NotNil(t, resp)
+			require.Nil(t, resp.Error)
+			require.JSONEq(t, tc.id, string(resp.ID))
+		})
+	}
+}
+
+func TestSendPropagatesCallerID(t *testing.T) {
+	s := newTestServer(t)
+	var seen json.RawMessage
+	c := NewClient(func(ctx context.Context, req *Request) (*Response, error) {
+		seen = append(seen[:0], req.ID...)
+		return s.Serve(ctx, req), nil
+	})
+
+	req := NewRequest("add", mustParams(t, addParams{A: 1, B: 2}), NewID("req-abc"))
+	resp, err := c.Send(context.Background(), req)
+	require.NoError(t, err)
+	require.Nil(t, resp.Error)
+	require.JSONEq(t, `"req-abc"`, string(seen))
+	require.JSONEq(t, `"req-abc"`, string(resp.ID))
+}
+
+func TestNewIDIntegerForms(t *testing.T) {
+	require.JSONEq(t, "42", string(NewID(42)))
+	require.JSONEq(t, "-7", string(NewID(int64(-7))))
+	require.JSONEq(t, "18446744073709551615", string(NewID(uint64(1<<64-1))))
+	require.JSONEq(t, `"abc"`, string(NewID("abc")))
+}
+
+func TestNewParamsPassthrough(t *testing.T) {
+	raw := json.RawMessage(`{"a":1}`)
+	out, err := NewParams(raw)
+	require.NoError(t, err)
+	require.Equal(t, string(raw), string(out))
+
+	out, err = NewParams(nil)
+	require.NoError(t, err)
+	require.Nil(t, out)
+}
+
 func TestDispatchWithCustomValidator(t *testing.T) {
 	s := NewServer()
 	// Pre-decode validator owns the full *Error including structured Data.
@@ -224,17 +340,20 @@ func TestDispatchWithCustomValidator(t *testing.T) {
 
 	c := NewClient(InProcess(s))
 
+	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
+	require.NoError(t, err)
+	require.Nil(t, resp.Error)
 	var ok addResult
-	require.NoError(t, c.Call(context.Background(), "add", addParams{A: 2, B: 3}, &ok))
+	require.NoError(t, resp.Decode(&ok))
 	require.Equal(t, 5, ok.Sum)
 
-	err := c.Call(context.Background(), "add", addParams{A: -1, B: 3}, nil)
-	var rpcErr *Error
-	require.ErrorAs(t, err, &rpcErr)
-	require.Equal(t, CodeInvalidParams, rpcErr.Code)
+	resp, err = c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: -1, B: 3}), NewID(2)))
+	require.NoError(t, err)
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeInvalidParams, resp.Error.Code)
 
 	var detail map[string]int
-	require.NoError(t, rpcErr.UnmarshalData(&detail))
+	require.NoError(t, resp.Error.UnmarshalData(&detail))
 	require.Equal(t, -1, detail["a"])
 	require.Equal(t, 3, detail["b"])
 }
@@ -243,8 +362,11 @@ func TestParamsAsRawMessagePassThrough(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(InProcess(s))
 
-	var got addResult
-	err := c.Call(context.Background(), "add", json.RawMessage(`{"a":7,"b":8}`), &got)
+	req := NewRequest("add", json.RawMessage(`{"a":7,"b":8}`), NewID(1))
+	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
+	require.Nil(t, resp.Error)
+	var got addResult
+	require.NoError(t, resp.Decode(&got))
 	require.Equal(t, 15, got.Sum)
 }

@@ -25,6 +25,11 @@
 // Sender for in-process use. Transport authors (HTTP, WebSocket, etc.)
 // write their own Sender.
 //
+// Build a Request with NewRequest or NewNotification; use NewID and
+// NewParams to encode the polymorphic id and params fields from Go
+// values. Round-trip with Client.Send, then check Response.Error and
+// decode Response.Result with Response.Decode.
+//
 // # Polymorphic fields
 //
 // Request.Params, Request.ID, Response.Result, and Error.Data are stored

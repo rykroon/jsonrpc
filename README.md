@@ -31,8 +31,10 @@ func main() {
 
     c := jsonrpc.NewClient(jsonrpc.InProcess(s))
 
+    params, _ := jsonrpc.NewParams(AddParams{A: 2, B: 3})
+    resp, _ := c.Send(context.Background(), jsonrpc.NewRequest("add", params, jsonrpc.NewID(1)))
     var sum int
-    _ = c.Call(context.Background(), "add", AddParams{A: 2, B: 3}, &sum)
+    _ = resp.Decode(&sum)
     fmt.Println(sum) // 5
 }
 ```
@@ -41,8 +43,11 @@ func main() {
 
 - `Server` — a method registry with raw (`RegisterHandler`) and typed
   (`Register`) registration APIs.
-- `Client` — generates IDs, marshals params, decodes results; wraps any
-  `Sender` (in-process, HTTP, WebSocket, etc.).
+- `Client.Send` — round-trips a `*Request` through a `Sender`
+  (in-process, HTTP, WebSocket, etc.).
+- `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
+  requests without touching `json.RawMessage` directly.
+- `Response.Decode` — unmarshal a successful result into a target.
 - `HandleMessage` — byte-level entry point for transport adapters that
   work in raw messages (stdio, WebSocket, TCP stream).
 - `DecodeParams`, `MarshalResult`, `Dispatch` — small building blocks for

@@ -100,3 +100,33 @@ notifications, no batch, no error.data).
 If a common server-transport shape ever emerges from writing real
 adapters, name it then. Until then: each transport adapter is its own
 shape and calls Serve / HandleMessage as appropriate.
+
+
+---
+
+Client API: layered like the server side
+
+Resolved direction (caller owns the ID; no generator):
+
+  - NewID[T ~string | ~int | ~int64 | ~uint64](v T) json.RawMessage
+  - NewParams(v any) (json.RawMessage, error)
+  - NewRequest(method, params, id) *Request
+  - NewNotification(method, params) *Request
+  - Client.Send(ctx, *Request) (*Response, error)
+  - (*Response).Decode(into any) error
+
+Call and Notify are gone. Send is the one client method; the constructors
+do the work that used to be hidden inside Call. Each helper has one job
+(marshal an id, marshal params, assemble a request, decode a result) and
+each returns an error only if it actually had to marshal something — so
+NewRequest itself is infallible.
+
+Why this shape:
+  - Symmetric with the server side. Server has Serve + HandleMessage as
+    layered entry points; client now has Send + the constructors that
+    feed it. Users compose rather than configure.
+  - Caller-provided IDs match how real systems already work — users have
+    correlation schemes (UUIDs, trace IDs, counters) and we shouldn't
+    impose one.
+  - Verbose at the call site, but every line is doing something the user
+    has an opinion about. Three lines >>> one line with hidden state.

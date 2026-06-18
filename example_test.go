@@ -30,8 +30,9 @@ func ExampleServer() {
 	// Output: {"jsonrpc":"2.0","result":5,"id":1}
 }
 
-// ExampleClient_Call uses the typed Client against an in-process Server.
-func ExampleClient_Call() {
+// ExampleClient_Send builds a Request with the constructors and sends it
+// through an in-process Server.
+func ExampleClient_Send() {
 	s := jsonrpc.NewServer()
 	jsonrpc.Register(s, "greet", func(_ context.Context, name string) (string, error) {
 		return "hello " + name, nil
@@ -39,11 +40,18 @@ func ExampleClient_Call() {
 
 	c := jsonrpc.NewClient(jsonrpc.InProcess(s))
 
-	var greeting string
-	if err := c.Call(context.Background(), "greet", "world", &greeting); err != nil {
-		fmt.Println("error:", err)
+	params, _ := jsonrpc.NewParams("world")
+	resp, err := c.Send(context.Background(), jsonrpc.NewRequest("greet", params, jsonrpc.NewID(1)))
+	if err != nil {
+		fmt.Println("transport error:", err)
 		return
 	}
+	if resp.Error != nil {
+		fmt.Println("rpc error:", resp.Error)
+		return
+	}
+	var greeting string
+	_ = resp.Decode(&greeting)
 	fmt.Println(greeting)
 	// Output: hello world
 }
