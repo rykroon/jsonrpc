@@ -22,8 +22,9 @@
 //
 // Client wraps a Sender — a function that round-trips a Request to a
 // Response across some transport. InProcess(s) adapts a Server into a
-// Sender for in-process use. Transport authors (HTTP, WebSocket, etc.)
-// write their own Sender.
+// Sender for in-process use. The jsonrpchttp subpackage provides an HTTP
+// adapter (both an http.Handler and a Sender); transport authors writing
+// for other wires implement Sender themselves.
 //
 // Build a Request with NewRequest or NewNotification; use NewID and
 // NewParams to encode the polymorphic id and params fields from Go
@@ -39,7 +40,7 @@
 //
 // # Not included
 //
-// Batch requests and built-in transport adapters are not in this package.
-// The seams — Sender on the client side, Server.Serve and HandleMessage
-// on the server side — are designed so that users can build them on top.
+// Batch requests are not supported. The seams — Sender on the client
+// side, Server.Serve and HandleMessage on the server side — are designed
+// so users can build additional transports on top of the core package.
 package jsonrpc
