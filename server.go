@@ -60,7 +60,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		return errorResponse(req.ID, NewError(CodeInvalidRequest, "missing method"))
 	}
 	if !req.IsNotification() && !isValidID(req.ID) {
-		return errorResponse(nil, NewError(CodeInvalidRequest, "id must be a string or integer"))
+		return errorResponse(nil, NewError(CodeInvalidRequest, "id must be a string, number, or null"))
 	}
 
 	s.mu.RLock()
@@ -87,32 +87,17 @@ func errorResponse(id json.RawMessage, e *Error) *Response {
 	return &Response{JSONRPC: Version, Error: e, ID: id}
 }
 
-// isValidID reports whether id is a JSON string or integer literal. JSON
-// null, floats, bools, objects, and arrays are rejected. An empty id is
-// also rejected — callers should check req.IsNotification() before calling
-// this.
+// isValidID reports whether id is a JSON string, number, or null. JSON
+// bools, objects, and arrays are rejected. The spec discourages null and
+// non-integer numbers but does not forbid them, so we allow both.
 //
 // Assumes id is well-formed JSON (which it is when sourced from json.Unmarshal).
-// We're recognizing the token shape, not parsing the value.
+// We're recognizing the token shape by its first byte, not parsing the value.
 func isValidID(id json.RawMessage) bool {
 	id = bytes.TrimSpace(id)
 	if len(id) == 0 {
 		return false
 	}
-	if id[0] == '"' {
-		return true
-	}
-	start := 0
-	if id[0] == '-' {
-		start = 1
-	}
-	if start == len(id) {
-		return false
-	}
-	for i := start; i < len(id); i++ {
-		if id[i] < '0' || id[i] > '9' {
-			return false
-		}
-	}
-	return true
+	c := id[0]
+	return c == '"' || c == '-' || c == 'n' || (c >= '0' && c <= '9')
 }

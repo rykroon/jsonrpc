@@ -228,10 +228,8 @@ func TestServerRejectsInvalidIDs(t *testing.T) {
 		name string
 		id   string
 	}{
-		{"float", "1.5"},
-		{"exponential", "1e2"},
-		{"null", "null"},
-		{"bool", "true"},
+		{"bool true", "true"},
+		{"bool false", "false"},
 		{"object", `{"x":1}`},
 		{"array", "[1,2,3]"},
 	}
@@ -265,6 +263,9 @@ func TestServerAcceptsValidIDs(t *testing.T) {
 		{"string", `"abc"`},
 		{"empty string", `""`},
 		{"large uint64", "18446744073709551615"},
+		{"float", "1.5"},
+		{"exponential", "1e2"},
+		{"null", "null"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
