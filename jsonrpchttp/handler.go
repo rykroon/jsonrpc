@@ -34,6 +34,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+		return
+	}
+
 	body := r.Body
 	if h.MaxBodyBytes > 0 {
 		body = http.MaxBytesReader(w, body, h.MaxBodyBytes)
