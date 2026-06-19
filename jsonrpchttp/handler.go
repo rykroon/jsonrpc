@@ -11,6 +11,7 @@ package jsonrpchttp
 
 import (
 	"io"
+	"mime"
 	"net/http"
 
 	"github.com/rykroon/jsonrpc"
@@ -33,7 +34,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("Content-Type") != "application/json" {
+	// Compare the media type only, ignoring parameters (e.g. charset) and
+	// case, so well-formed requests like "application/json; charset=utf-8"
+	// are accepted. A missing or unparseable Content-Type is rejected.
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
 		return
 	}

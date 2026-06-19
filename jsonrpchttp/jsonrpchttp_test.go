@@ -93,6 +93,28 @@ func TestHandlerParseError(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
+func TestHandlerAcceptsContentTypeWithParams(t *testing.T) {
+	ts, _ := newTestHTTP(t)
+
+	resp, err := http.Post(ts.URL, "application/json; charset=utf-8",
+		strings.NewReader(`{"jsonrpc":"2.0","method":"addOne","params":1,"id":1}`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestHandlerRejectsNonJSONContentType(t *testing.T) {
+	ts, _ := newTestHTTP(t)
+
+	for _, ct := range []string{"text/plain", ""} {
+		resp, err := http.Post(ts.URL, ct,
+			strings.NewReader(`{"jsonrpc":"2.0","method":"addOne","params":1,"id":1}`))
+		require.NoError(t, err)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusUnsupportedMediaType, resp.StatusCode, "content-type %q", ct)
+	}
+}
+
 func TestHandlerEnforcesMaxBodyBytes(t *testing.T) {
 	h := &jsonrpchttp.Handler{Server: newServer(t), MaxBodyBytes: 16}
 	ts := httptest.NewServer(h)
