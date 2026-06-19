@@ -1,93 +1,30 @@
-Message layer (deferred — write when adding first byte-based transport)
+Batch support (deferred)
 
-There's a pre-server pipeline that every byte-based transport (HTTP,
-WebSocket, stdio, TCP) needs and that in-process skips:
+Lives on Server.ServeMessage. Sketch: detect '[' as the first non-space
+byte, decode as []Request, call Serve per element, collect non-nil
+Responses, marshal as a JSON array. An all-notifications batch returns
+(nil, nil) per spec.
 
-  bytes -> parse JSON -> detect single vs batch -> dispatch each -> aggregate -> marshal
+Open questions to resolve when implementing:
+  - Batch-level observability (logging size on receipt). Add a separate
+    method or let users wrap.
+  - Whether to enforce a max batch size.
 
-The right tool is probably one free function:
-
-  func HandleMessage(
-      ctx context.Context,
-      data []byte,
-      fn func(context.Context, *Request) *Response,
-  ) ([]byte, error)
-
-Behavior:
-  - peek first non-space byte of data
-  - '[' -> decode as []Request, call fn per element, collect non-nil
-    Responses, marshal as array
-  - '{' -> decode as Request, call fn once, marshal Response
-  - bad JSON / anything else -> marshal a single CodeParseError Response
-    with "id": null
-  - all-notifications batch -> return (nil, nil) per spec
-  - notification (single) -> return (nil, nil)
-
-Why this shape:
-  - Free function, not a Server method. The pre-server work is genuinely
-    above Server in the stack; making the dispatcher a parameter makes the
-    layering explicit and keeps Server focused on single-request dispatch.
-  - Takes a func, not an interface. Mirrors Sender on the client side.
-    (*Server).Serve already matches the signature; wrapping for auth,
-    logging, ctx adjustments, etc. is trivial.
-  - The escape hatch is implicit. Transports that want full control
-    (e.g. HTTP that wants HTTP 400 on parse failure instead of an in-band
-    CodeParseError) skip HandleMessage and parse/loop themselves using
-    Server.Serve. Same convenience/primitive pairing as
-    Register / RegisterHandler.
-
-Bundled with batch support. HandleMessage and batch are really one
-decision — the shape of the function is determined by whether it returns
-one Response, a batch, or "either depending on input." Can't add
-HandleMessage cleanly without picking, and batch handling is most of the
-body anyway.
-
-Not addressed:
-  - Batch-level observability (e.g. "log batch size on receipt"). If
-    needed, either add a HandleMessageWith(...opts) variant or the
-    transport writes its own loop using Server.Serve. Don't pre-solve.
-  - Streaming/keepalive concerns for long-lived transports — those live
-    in the transport adapter, not here.
-
-Usage sketch:
-
-  // HTTP adapter, batch-supporting
-  out, _ := jsonrpc.HandleMessage(r.Context(), body, h.server.Serve)
-  if out == nil { w.WriteHeader(http.StatusNoContent); return }
-  w.Write(out)
-
-  // stdio loop
-  for {
-      msg := readFrame(stdin)
-      out, _ := jsonrpc.HandleMessage(ctx, msg, server.Serve)
-      if out != nil { writeFrame(stdout, out) }
-  }
-
-  // HTTP adapter, no batch, wants HTTP 400 on parse failure
-  // -- skips HandleMessage. Decodes Request directly, calls Serve.
-
-
----
 
 Parse errors and layering
 
 JSON-RPC's CodeParseError isn't universally right — it's a layering
-mistake for transports that have native error signaling (HTTP -> 400) and
-the correct answer for transports that don't (stdio, TCP stream, single
-WebSocket frame in a long-lived connection). Don't centralize parse-error
-response generation at the Server level. Each transport adapter chooses
-its idiom: HTTP returns 400, stream transports use HandleMessage's
-in-band CodeParseError.
+mistake for transports with native error signaling (HTTP -> 400) and the
+correct answer for transports that don't (stdio, TCP stream, single
+WebSocket frame in a long-lived connection). Don't centralize
+parse-error response generation at the Server level. Each transport
+adapter picks its idiom: HTTP returns 400, stream transports use
+Server.ServeMessage's in-band CodeParseError.
 
-In-process can't produce parse errors structurally — Requests are
-constructed as Go values.
-
-
----
 
 Sender / Transport asymmetry
 
-Sender (client side) = the transport. Same function on both sides of any
+Sender (client side) = the transport. Same shape on both sides of any
 real wire. In-process is the degenerate case: a direct function call,
 exposed via InProcess(s).
 
@@ -98,35 +35,11 @@ streaming shape and that's why net/rpc/jsonrpc is incomplete (no real
 notifications, no batch, no error.data).
 
 If a common server-transport shape ever emerges from writing real
-adapters, name it then. Until then: each transport adapter is its own
-shape and calls Serve / HandleMessage as appropriate.
+adapters, name it then.
 
 
----
+Tabled
 
-Client API: layered like the server side
-
-Resolved direction (caller owns the ID; no generator):
-
-  - NewID[T ~string | ~int | ~int64 | ~uint64](v T) json.RawMessage
-  - NewParams(v any) (json.RawMessage, error)
-  - NewRequest(method, params, id) *Request
-  - NewNotification(method, params) *Request
-  - Client.Send(ctx, *Request) (*Response, error)
-  - (*Response).Decode(into any) error
-
-Call and Notify are gone. Send is the one client method; the constructors
-do the work that used to be hidden inside Call. Each helper has one job
-(marshal an id, marshal params, assemble a request, decode a result) and
-each returns an error only if it actually had to marshal something — so
-NewRequest itself is infallible.
-
-Why this shape:
-  - Symmetric with the server side. Server has Serve + HandleMessage as
-    layered entry points; client now has Send + the constructors that
-    feed it. Users compose rather than configure.
-  - Caller-provided IDs match how real systems already work — users have
-    correlation schemes (UUIDs, trace IDs, counters) and we shouldn't
-    impose one.
-  - Verbose at the call site, but every line is doing something the user
-    has an opinion about. Three lines >>> one line with hidden state.
+- Error.WithData panics on marshal failure. Lean alternative: drop the
+  panic, change signature to WithData(json.RawMessage), let callers
+  json.Marshal themselves. Decide on revisit.

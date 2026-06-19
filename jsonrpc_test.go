@@ -157,9 +157,9 @@ func TestResponseAlwaysHasID(t *testing.T) {
 }
 
 func TestMessageServerSingleRequest(t *testing.T) {
-	m := &MessageServer{Server: newTestServer(t)}
+	s := newTestServer(t)
 	data := []byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`)
-	out, err := m.ServeMessage(context.Background(), data)
+	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response
@@ -176,18 +176,17 @@ func TestMessageServerNotification(t *testing.T) {
 		called <- struct{}{}
 		return struct{}{}, nil
 	})
-	m := &MessageServer{Server: s}
 	data := []byte(`{"jsonrpc":"2.0","method":"ping"}`)
-	out, err := m.ServeMessage(context.Background(), data)
+	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 	require.Nil(t, out)
 	<-called
 }
 
 func TestMessageServerParseError(t *testing.T) {
-	m := &MessageServer{Server: newTestServer(t)}
+	s := newTestServer(t)
 	data := []byte(`{not valid json`)
-	out, err := m.ServeMessage(context.Background(), data)
+	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response
@@ -198,9 +197,9 @@ func TestMessageServerParseError(t *testing.T) {
 }
 
 func TestMessageServerBatchRejected(t *testing.T) {
-	m := &MessageServer{Server: newTestServer(t)}
+	s := newTestServer(t)
 	data := []byte(` [{"jsonrpc":"2.0","method":"add","id":1}]`)
-	out, err := m.ServeMessage(context.Background(), data)
+	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response
@@ -211,9 +210,9 @@ func TestMessageServerBatchRejected(t *testing.T) {
 }
 
 func TestMessageServerInvalidShape(t *testing.T) {
-	m := &MessageServer{Server: newTestServer(t)}
+	s := newTestServer(t)
 	data := []byte(`12345`)
-	out, err := m.ServeMessage(context.Background(), data)
+	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response

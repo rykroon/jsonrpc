@@ -48,19 +48,20 @@ func main() {
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
   requests without touching `json.RawMessage` directly.
 - `Response.Decode` — unmarshal a successful result into a target.
-- `HandleMessage` — byte-level entry point for transport adapters that
+- `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream).
 - `DecodeParams`, `MarshalResult`, `Dispatch` — small building blocks for
   escape-hatch handlers that need custom pre-decode or post-call logic
   (e.g. JSON schema validation with structured `Error.Data`).
+- `jsonrpchttp` subpackage — `http.Handler` and `Sender` for the common
+  single-request HTTP transport.
 
 ## What it does not include
 
 - Batch requests.
-- Built-in transport adapters (HTTP, WebSocket, etc.).
 
-The seams are designed so these can be built on top without changes to
-the package.
+The seams are designed so additional transports can be built on top
+without changes to the core package.
 
 ## Docs
 

@@ -16,12 +16,11 @@ import (
 	"github.com/rykroon/jsonrpc"
 )
 
-// Handler adapts a *jsonrpc.MessageServer to an http.Handler. JSON-RPC
-// messages are accepted as POST request bodies; responses are written as
-// JSON.
+// Handler adapts a *jsonrpc.Server to an http.Handler. JSON-RPC messages
+// are accepted as POST request bodies; responses are written as JSON.
 type Handler struct {
-	// Server is the message-level JSON-RPC dispatcher. Required.
-	Server *jsonrpc.MessageServer
+	// Server is the JSON-RPC server to dispatch to. Required.
+	Server *jsonrpc.Server
 
 	// MaxBodyBytes caps the request body size. Zero means no limit.
 	MaxBodyBytes int64

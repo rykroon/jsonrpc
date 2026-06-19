@@ -56,17 +56,16 @@ func ExampleClient_Send() {
 	// Output: hello world
 }
 
-// ExampleMessageServer shows the byte-level entry point used by transport
-// adapters that work in raw messages.
-func ExampleMessageServer() {
+// ExampleServer_ServeMessage shows the byte-level entry point used by
+// transport adapters that work in raw messages.
+func ExampleServer_ServeMessage() {
 	s := jsonrpc.NewServer()
 	jsonrpc.Register(s, "echo", func(_ context.Context, msg string) (string, error) {
 		return msg, nil
 	})
 
-	m := &jsonrpc.MessageServer{Server: s}
 	in := []byte(`{"jsonrpc":"2.0","method":"echo","params":"ping","id":1}`)
-	out, _ := m.ServeMessage(context.Background(), in)
+	out, _ := s.ServeMessage(context.Background(), in)
 	fmt.Println(string(out))
 	// Output: {"jsonrpc":"2.0","result":"ping","id":1}
 }

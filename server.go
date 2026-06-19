@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -80,6 +81,40 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	return &Response{JSONRPC: Version, Result: result, ID: req.ID}
 }
 
+// ServeMessage parses data as a JSON-RPC message, dispatches it via Serve,
+// and returns the marshaled response bytes. Notifications produce (nil, nil)
+// — there is no reply to send.
+//
+// Use ServeMessage from transports that work in raw JSON messages
+// (WebSocket, stdio, TCP). HTTP adapters that prefer to surface parse
+// failures as HTTP 400 should call Serve directly instead.
+//
+// Currently single requests only — batch messages (JSON arrays) are
+// rejected with CodeInvalidRequest. Batch support is planned.
+//
+// JSON-RPC errors (parse errors, invalid request, etc.) are returned
+// in-band as a marshaled error Response, not as the error return. The
+// error return is reserved for response marshaling failures, which should
+// not occur in normal operation.
+func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
+	if isJSONArray(data) {
+		return marshalMessageError(NewError(CodeInvalidRequest, "batch requests are not supported"))
+	}
+	var req Request
+	if err := json.Unmarshal(data, &req); err != nil {
+		var syntaxErr *json.SyntaxError
+		if errors.As(err, &syntaxErr) {
+			return marshalMessageError(NewError(CodeParseError, err.Error()))
+		}
+		return marshalMessageError(NewError(CodeInvalidRequest, err.Error()))
+	}
+	resp := s.Serve(ctx, &req)
+	if resp == nil {
+		return nil, nil
+	}
+	return json.Marshal(resp)
+}
+
 func errorResponse(id json.RawMessage, e *Error) *Response {
 	if len(id) == 0 {
 		id = json.RawMessage("null")
@@ -100,4 +135,22 @@ func isValidID(id json.RawMessage) bool {
 	}
 	c := id[0]
 	return c == '"' || c == '-' || c == 'n' || (c >= '0' && c <= '9')
+}
+
+func isJSONArray(data []byte) bool {
+	for _, b := range data {
+		if b == ' ' || b == '\t' || b == '\r' || b == '\n' {
+			continue
+		}
+		return b == '['
+	}
+	return false
+}
+
+func marshalMessageError(e *Error) (json.RawMessage, error) {
+	return json.Marshal(&Response{
+		JSONRPC: Version,
+		Error:   e,
+		ID:      json.RawMessage("null"),
+	})
 }
