@@ -14,11 +14,12 @@
 // drop to the lower-level helpers when you need a pre-decode hook (e.g.
 // JSON schema validation) or post-call transformation.
 //
-// HandleMessage is the byte-level entry point used by transport adapters
-// that work in raw messages (WebSocket, stdio, TCP). It handles JSON
-// parsing and the spec's in-band parse error reporting. HTTP adapters that
-// prefer to surface parse failures as HTTP 400 should skip HandleMessage
-// and call Server.Serve directly.
+// MessageServer wraps a Server and exposes a byte-level entry point —
+// ServeMessage(ctx, json.RawMessage) — for transports that work in raw
+// messages (WebSocket, stdio, TCP). It handles JSON parsing and the spec's
+// in-band parse error reporting. HTTP adapters that prefer to surface
+// parse failures as HTTP 400 should skip MessageServer and call
+// Server.Serve directly.
 //
 // Client wraps a Sender — a function that round-trips a Request to a
 // Response across some transport. InProcess(s) adapts a Server into a
@@ -41,6 +42,6 @@
 // # Not included
 //
 // Batch requests are not supported. The seams — Sender on the client
-// side, Server.Serve and HandleMessage on the server side — are designed
+// side, Server.Serve and MessageServer on the server side — are designed
 // so users can build additional transports on top of the core package.
 package jsonrpc

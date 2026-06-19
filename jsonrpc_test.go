@@ -156,10 +156,10 @@ func TestResponseAlwaysHasID(t *testing.T) {
 	require.Contains(t, string(b), `"id":null`)
 }
 
-func TestHandleMessageSingleRequest(t *testing.T) {
-	s := newTestServer(t)
+func TestMessageServerSingleRequest(t *testing.T) {
+	m := &MessageServer{Server: newTestServer(t)}
 	data := []byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`)
-	out, err := HandleMessage(context.Background(), data, s.Serve)
+	out, err := m.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response
@@ -169,24 +169,25 @@ func TestHandleMessageSingleRequest(t *testing.T) {
 	require.JSONEq(t, "1", string(resp.ID))
 }
 
-func TestHandleMessageNotification(t *testing.T) {
+func TestMessageServerNotification(t *testing.T) {
 	s := NewServer()
 	called := make(chan struct{}, 1)
 	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
 		called <- struct{}{}
 		return struct{}{}, nil
 	})
+	m := &MessageServer{Server: s}
 	data := []byte(`{"jsonrpc":"2.0","method":"ping"}`)
-	out, err := HandleMessage(context.Background(), data, s.Serve)
+	out, err := m.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 	require.Nil(t, out)
 	<-called
 }
 
-func TestHandleMessageParseError(t *testing.T) {
-	s := newTestServer(t)
+func TestMessageServerParseError(t *testing.T) {
+	m := &MessageServer{Server: newTestServer(t)}
 	data := []byte(`{not valid json`)
-	out, err := HandleMessage(context.Background(), data, s.Serve)
+	out, err := m.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response
@@ -196,10 +197,10 @@ func TestHandleMessageParseError(t *testing.T) {
 	require.JSONEq(t, "null", string(resp.ID))
 }
 
-func TestHandleMessageBatchRejected(t *testing.T) {
-	s := newTestServer(t)
+func TestMessageServerBatchRejected(t *testing.T) {
+	m := &MessageServer{Server: newTestServer(t)}
 	data := []byte(` [{"jsonrpc":"2.0","method":"add","id":1}]`)
-	out, err := HandleMessage(context.Background(), data, s.Serve)
+	out, err := m.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response
@@ -209,10 +210,10 @@ func TestHandleMessageBatchRejected(t *testing.T) {
 	require.Contains(t, resp.Error.Message, "batch")
 }
 
-func TestHandleMessageInvalidShape(t *testing.T) {
-	s := newTestServer(t)
+func TestMessageServerInvalidShape(t *testing.T) {
+	m := &MessageServer{Server: newTestServer(t)}
 	data := []byte(`12345`)
-	out, err := HandleMessage(context.Background(), data, s.Serve)
+	out, err := m.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response

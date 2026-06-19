@@ -24,7 +24,9 @@ func newServer(t *testing.T) *jsonrpc.Server {
 
 func newTestHTTP(t *testing.T) (*httptest.Server, *jsonrpc.Client) {
 	t.Helper()
-	ts := httptest.NewServer(&jsonrpchttp.Handler{Server: newServer(t)})
+	ts := httptest.NewServer(&jsonrpchttp.Handler{
+		Server: &jsonrpc.MessageServer{Server: newServer(t)},
+	})
 	t.Cleanup(ts.Close)
 	client := jsonrpc.NewClient(&jsonrpchttp.Sender{URL: ts.URL})
 	return ts, client
@@ -94,7 +96,10 @@ func TestHandlerParseError(t *testing.T) {
 }
 
 func TestHandlerEnforcesMaxBodyBytes(t *testing.T) {
-	h := &jsonrpchttp.Handler{Server: newServer(t), MaxBodyBytes: 16}
+	h := &jsonrpchttp.Handler{
+		Server:       &jsonrpc.MessageServer{Server: newServer(t)},
+		MaxBodyBytes: 16,
+	}
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
