@@ -11,6 +11,14 @@ const (
 	CodeMethodNotFound = -32601
 	CodeInvalidParams  = -32602
 	CodeInternalError  = -32603
+
+	// CodeServerError and CodeServerErrorMin bound the JSON-RPC 2.0
+	// server-defined error range (-32000 to -32099), reserved for
+	// application-defined errors. Choose codes within this range to avoid
+	// colliding with the reserved protocol codes above; CodeServerError is
+	// the conventional default.
+	CodeServerError    = -32000 // first (highest) server-defined code
+	CodeServerErrorMin = -32099 // last (lowest) server-defined code
 )
 
 // Error is the JSON-RPC error object. Data is optional; when present it holds
