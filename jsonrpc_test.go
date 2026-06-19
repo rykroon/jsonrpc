@@ -359,6 +359,78 @@ func TestDispatchWithCustomValidator(t *testing.T) {
 	require.Equal(t, 3, detail["b"])
 }
 
+// tagMiddleware appends its name to *log when the request passes through,
+// letting tests assert ordering of the wrapping.
+func tagMiddleware(name string, log *[]string) Middleware {
+	return func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+			*log = append(*log, name)
+			return next.Handle(ctx, raw)
+		})
+	}
+}
+
+func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
+	s := NewServer()
+	// A raw middleware that rejects without ever decoding into the typed P.
+	requirePositive := func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+			var p addParams
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, NewError(CodeInvalidParams, err.Error())
+			}
+			if p.A < 0 || p.B < 0 {
+				return nil, NewError(CodeInvalidParams, "operands must be non-negative")
+			}
+			return next.Handle(ctx, raw)
+		})
+	}
+	Register(s, "add", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
+	}, requirePositive)
+
+	c := NewClient(InProcess(s))
+
+	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
+	require.NoError(t, err)
+	require.Nil(t, resp.Error)
+	var ok addResult
+	require.NoError(t, resp.Decode(&ok))
+	require.Equal(t, 5, ok.Sum)
+
+	resp, err = c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: -1, B: 3}), NewID(2)))
+	require.NoError(t, err)
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeInvalidParams, resp.Error.Code)
+}
+
+func TestMiddlewareOrdering(t *testing.T) {
+	var log []string
+	s := NewServer()
+	s.Use(tagMiddleware("server1", &log), tagMiddleware("server2", &log))
+	Register(s, "add", func(_ context.Context, p addParams) (addResult, error) {
+		log = append(log, "handler")
+		return addResult{Sum: p.A + p.B}, nil
+	}, tagMiddleware("method1", &log), tagMiddleware("method2", &log))
+
+	c := NewClient(InProcess(s))
+	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 1, B: 1}), NewID(1)))
+	require.NoError(t, err)
+	require.Nil(t, resp.Error)
+	// Server middleware wraps around per-method middleware; mw[0] is outermost.
+	require.Equal(t, []string{"server1", "server2", "method1", "method2", "handler"}, log)
+}
+
+func TestUseAfterRegisterPanics(t *testing.T) {
+	s := NewServer()
+	Register(s, "add", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
+	})
+	require.Panics(t, func() {
+		s.Use(func(next Handler) Handler { return next })
+	})
+}
+
 func TestParamsAsRawMessagePassThrough(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(InProcess(s))

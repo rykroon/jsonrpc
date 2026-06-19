@@ -28,24 +28,57 @@ func (f HandlerFunc) Handle(ctx context.Context, params json.RawMessage) (json.R
 	return f(ctx, params)
 }
 
+// Middleware wraps a Handler to add cross-cutting behavior (auth, logging,
+// validation, etc.). It operates on the raw params, so it composes with both
+// typed handlers (via Register) and raw handlers without touching the typed
+// pipeline. The first middleware in a chain is the outermost layer.
+type Middleware func(Handler) Handler
+
+// chain wraps h with mw, applying mw[0] outermost.
+func chain(h Handler, mw []Middleware) Handler {
+	for i := len(mw) - 1; i >= 0; i-- {
+		h = mw[i](h)
+	}
+	return h
+}
+
 // Server is a registry of JSON-RPC methods that dispatches requests to them.
 type Server struct {
-	mu      sync.RWMutex
-	methods map[string]Handler
+	mu         sync.RWMutex
+	methods    map[string]Handler
+	middleware []Middleware
 }
 
 func NewServer() *Server {
 	return &Server{methods: map[string]Handler{}}
 }
 
-// RegisterHandler installs h under name. It panics if name is already taken.
-func (s *Server) RegisterHandler(name string, h Handler) {
+// Use appends server-wide middleware applied to every handler, wrapping
+// around any per-method middleware. The first middleware passed is the
+// outermost layer.
+//
+// Use must be called before registering methods: middleware is baked into
+// each handler at registration time, so Use has no effect on methods already
+// registered. It panics if called after a method is registered.
+func (s *Server) Use(mw ...Middleware) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.methods) > 0 {
+		panic("jsonrpc: Use must be called before registering methods")
+	}
+	s.middleware = append(s.middleware, mw...)
+}
+
+// RegisterHandler installs h under name, wrapped with the given per-method
+// middleware (mw[0] outermost) and then the server-wide middleware. It panics
+// if name is already taken.
+func (s *Server) RegisterHandler(name string, h Handler, mw ...Middleware) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, dup := s.methods[name]; dup {
 		panic(fmt.Sprintf("jsonrpc: method %q already registered", name))
 	}
-	s.methods[name] = h
+	s.methods[name] = chain(chain(h, mw), s.middleware)
 }
 
 // Serve dispatches a single request. For notifications the returned

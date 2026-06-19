@@ -56,6 +56,36 @@ func ExampleClient_Send() {
 	// Output: hello world
 }
 
+// ExampleMiddleware shows a cross-cutting concern composed with a typed
+// handler. The middleware operates on raw params, so it works without
+// touching the typed pipeline or hand-wiring Dispatch.
+func ExampleMiddleware() {
+	// logging is reusable middleware: it knows nothing about the handler's
+	// parameter or result types.
+	logging := func(next jsonrpc.Handler) jsonrpc.Handler {
+		return jsonrpc.HandlerFunc(func(ctx context.Context, params json.RawMessage) (json.RawMessage, *jsonrpc.Error) {
+			fmt.Printf("calling with params: %s\n", params)
+			return next.Handle(ctx, params)
+		})
+	}
+
+	s := jsonrpc.NewServer()
+	s.Use(logging) // applied to every method
+	jsonrpc.Register(s, "add", func(_ context.Context, p struct {
+		A int `json:"a"`
+		B int `json:"b"`
+	}) (int, error) {
+		return p.A + p.B, nil
+	})
+
+	in := []byte(`{"jsonrpc":"2.0","method":"add","params":{"a":2,"b":3},"id":1}`)
+	out, _ := s.ServeMessage(context.Background(), in)
+	fmt.Println(string(out))
+	// Output:
+	// calling with params: {"a":2,"b":3}
+	// {"jsonrpc":"2.0","result":5,"id":1}
+}
+
 // ExampleServer_ServeMessage shows the byte-level entry point used by
 // transport adapters that work in raw messages.
 func ExampleServer_ServeMessage() {
