@@ -4,9 +4,13 @@
 //
 // Server holds a registry of methods and dispatches a Request to one:
 //
-//   - Server.RegisterHandler installs a raw Handler under a method name.
+//   - Server.RegisterHandler installs a raw HandlerFunc under a method name.
 //   - Server.Serve(ctx, *Request) *Response dispatches a single decoded
 //     Request; returns nil for notifications.
+//
+// Cross-cutting concerns (auth, logging, validation) are added as Middleware
+// — func(HandlerFunc) HandlerFunc — passed per method to Register /
+// RegisterHandler or server-wide via Server.Use.
 //
 // Register, DecodeParams, MarshalResult, and Dispatch are free functions
 // that build a typed pipeline (raw bytes → typed params → typed result →

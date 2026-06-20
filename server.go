@@ -9,33 +9,24 @@ import (
 	"sync"
 )
 
-// Handler is the low-level dispatch contract. It receives the raw params
+// HandlerFunc is the low-level dispatch contract. It receives the raw params
 // bytes (possibly empty) and returns either result bytes or an *Error.
 // A nil result with a nil error is valid and encodes as `"result":null`.
 //
-// Implement Handler on a struct when the handler carries state (e.g. a
-// compiled JSON schema, a rate limiter, a cache). For a plain function,
-// use HandlerFunc.
-type Handler interface {
-	Handle(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error)
-}
-
-// HandlerFunc adapts a plain function into a Handler. The pattern mirrors
-// net/http's Handler / HandlerFunc.
+// Write a plain function for a stateless method. For a method that carries
+// state (a DB pool, a compiled JSON schema, a service object), register a
+// method value — e.g. s.RegisterHandler(name, svc.Handle) — which captures
+// the receiver and satisfies HandlerFunc without any cast.
 type HandlerFunc func(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error)
 
-func (f HandlerFunc) Handle(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error) {
-	return f(ctx, params)
-}
-
-// Middleware wraps a Handler to add cross-cutting behavior (auth, logging,
-// validation, etc.). It operates on the raw params, so it composes with both
-// typed handlers (via Register) and raw handlers without touching the typed
-// pipeline. The first middleware in a chain is the outermost layer.
-type Middleware func(Handler) Handler
+// Middleware wraps a HandlerFunc to add cross-cutting behavior (auth,
+// logging, validation, etc.). It operates on the raw params, so it composes
+// with both typed handlers (via Register) and raw handlers without touching
+// the typed pipeline. The first middleware in a chain is the outermost layer.
+type Middleware func(next HandlerFunc) HandlerFunc
 
 // chain wraps h with mw, applying mw[0] outermost.
-func chain(h Handler, mw []Middleware) Handler {
+func chain(h HandlerFunc, mw []Middleware) HandlerFunc {
 	for i := len(mw) - 1; i >= 0; i-- {
 		h = mw[i](h)
 	}
@@ -45,12 +36,12 @@ func chain(h Handler, mw []Middleware) Handler {
 // Server is a registry of JSON-RPC methods that dispatches requests to them.
 type Server struct {
 	mu         sync.RWMutex
-	methods    map[string]Handler
+	methods    map[string]HandlerFunc
 	middleware []Middleware
 }
 
 func NewServer() *Server {
-	return &Server{methods: map[string]Handler{}}
+	return &Server{methods: map[string]HandlerFunc{}}
 }
 
 // Use appends server-wide middleware applied to every handler, wrapping
@@ -72,7 +63,7 @@ func (s *Server) Use(mw ...Middleware) {
 // RegisterHandler installs h under name, wrapped with the given per-method
 // middleware (mw[0] outermost) and then the server-wide middleware. It panics
 // if name is already taken.
-func (s *Server) RegisterHandler(name string, h Handler, mw ...Middleware) {
+func (s *Server) RegisterHandler(name string, h HandlerFunc, mw ...Middleware) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, dup := s.methods[name]; dup {
@@ -104,7 +95,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		return errorResponse(req.ID, NewError(CodeMethodNotFound, "method not found: "+req.Method))
 	}
 
-	result, rpcErr := h.Handle(ctx, req.Params)
+	result, rpcErr := h(ctx, req.Params)
 	if req.IsNotification() {
 		return nil
 	}

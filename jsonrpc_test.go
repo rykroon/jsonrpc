@@ -330,14 +330,14 @@ func TestDispatchWithCustomValidator(t *testing.T) {
 		}
 		return nil
 	}
-	s.RegisterHandler("add", HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+	s.RegisterHandler("add", func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 		if vErr := requirePositive(raw); vErr != nil {
 			return nil, vErr
 		}
 		return Dispatch(ctx, raw, func(_ context.Context, p addParams) (addResult, error) {
 			return addResult{Sum: p.A + p.B}, nil
 		})
-	}))
+	})
 
 	c := NewClient(InProcess(s))
 
@@ -362,19 +362,19 @@ func TestDispatchWithCustomValidator(t *testing.T) {
 // tagMiddleware appends its name to *log when the request passes through,
 // letting tests assert ordering of the wrapping.
 func tagMiddleware(name string, log *[]string) Middleware {
-	return func(next Handler) Handler {
-		return HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+	return func(next HandlerFunc) HandlerFunc {
+		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 			*log = append(*log, name)
-			return next.Handle(ctx, raw)
-		})
+			return next(ctx, raw)
+		}
 	}
 }
 
 func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
 	s := NewServer()
 	// A raw middleware that rejects without ever decoding into the typed P.
-	requirePositive := func(next Handler) Handler {
-		return HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+	requirePositive := func(next HandlerFunc) HandlerFunc {
+		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, NewError(CodeInvalidParams, err.Error())
@@ -382,8 +382,8 @@ func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
 			if p.A < 0 || p.B < 0 {
 				return nil, NewError(CodeInvalidParams, "operands must be non-negative")
 			}
-			return next.Handle(ctx, raw)
-		})
+			return next(ctx, raw)
+		}
 	}
 	Register(s, "add", func(_ context.Context, p addParams) (addResult, error) {
 		return addResult{Sum: p.A + p.B}, nil
@@ -427,7 +427,7 @@ func TestUseAfterRegisterPanics(t *testing.T) {
 		return addResult{Sum: p.A + p.B}, nil
 	})
 	require.Panics(t, func() {
-		s.Use(func(next Handler) Handler { return next })
+		s.Use(func(next HandlerFunc) HandlerFunc { return next })
 	})
 }
 

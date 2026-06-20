@@ -54,14 +54,14 @@ func Dispatch[P, R any](
 	return MarshalResult(r)
 }
 
-// Register adapts a typed function into a Handler and installs it on s,
+// Register adapts a typed function into a HandlerFunc and installs it on s,
 // wrapped with the given per-method middleware (mw[0] outermost) followed by
 // the server-wide middleware. This lets cross-cutting concerns compose with
 // typed handlers without hand-wiring Dispatch.
 //
-// Equivalent to s.RegisterHandler(name, HandlerFunc(func(ctx, raw) { return Dispatch(ctx, raw, fn) }), mw...).
+// Equivalent to s.RegisterHandler(name, func(ctx, raw) { return Dispatch(ctx, raw, fn) }, mw...).
 func Register[P, R any](s *Server, name string, fn func(context.Context, P) (R, error), mw ...Middleware) {
-	s.RegisterHandler(name, HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+	s.RegisterHandler(name, func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 		return Dispatch(ctx, raw, fn)
-	}), mw...)
+	}, mw...)
 }

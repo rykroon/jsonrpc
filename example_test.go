@@ -61,12 +61,13 @@ func ExampleClient_Send() {
 // touching the typed pipeline or hand-wiring Dispatch.
 func ExampleMiddleware() {
 	// logging is reusable middleware: it knows nothing about the handler's
-	// parameter or result types.
-	logging := func(next jsonrpc.Handler) jsonrpc.Handler {
-		return jsonrpc.HandlerFunc(func(ctx context.Context, params json.RawMessage) (json.RawMessage, *jsonrpc.Error) {
+	// parameter or result types. The returned func literal converts to
+	// HandlerFunc automatically — no cast needed.
+	logging := func(next jsonrpc.HandlerFunc) jsonrpc.HandlerFunc {
+		return func(ctx context.Context, params json.RawMessage) (json.RawMessage, *jsonrpc.Error) {
 			fmt.Printf("calling with params: %s\n", params)
-			return next.Handle(ctx, params)
-		})
+			return next(ctx, params)
+		}
 	}
 
 	s := jsonrpc.NewServer()

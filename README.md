@@ -39,10 +39,39 @@ func main() {
 }
 ```
 
+## Middleware
+
+Cross-cutting concerns — auth, logging, validation — are written once as
+`Middleware` (`func(HandlerFunc) HandlerFunc`) and composed with handlers.
+Because middleware works on the raw params, it layers cleanly over typed
+handlers without touching the typed pipeline:
+
+```go
+// logging knows nothing about any handler's param or result types.
+func logging(next jsonrpc.HandlerFunc) jsonrpc.HandlerFunc {
+    return func(ctx context.Context, params json.RawMessage) (json.RawMessage, *jsonrpc.Error) {
+        log.Printf("rpc params: %s", params)
+        return next(ctx, params)
+    }
+}
+
+s := jsonrpc.NewServer()
+s.Use(logging) // server-wide: applied to every method
+
+// or per method (mw[0] is outermost), wrapped inside any server-wide middleware:
+jsonrpc.Register(s, "add", add, requireAuth)
+```
+
+`Use` must be called before registering methods. The first middleware listed
+is the outermost layer, and server-wide middleware wraps around per-method
+middleware.
+
 ## What it gives you
 
 - `Server` — a method registry with raw (`RegisterHandler`) and typed
   (`Register`) registration APIs.
+- `Middleware` / `Server.Use` — compose auth, logging, and validation
+  around handlers (per-method or server-wide).
 - `Client.Send` — round-trips a `*Request` through a `Sender`
   (in-process, HTTP, WebSocket, etc.).
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
