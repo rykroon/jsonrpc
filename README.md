@@ -79,9 +79,10 @@ middleware.
 - `Response.Decode` — unmarshal a successful result into a target.
 - `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream).
-- `DecodeParams`, `MarshalResult`, `Dispatch` — small building blocks for
-  escape-hatch handlers that need custom pre-decode or post-call logic
-  (e.g. JSON schema validation with structured `Error.Data`).
+- `Typed`, `DecodeParams`, `MarshalResult` — building blocks for the typed
+  pipeline. `Typed(fn)` turns a typed function into a `HandlerFunc` you can
+  reuse or wrap in `Middleware` (e.g. JSON schema validation with structured
+  `Error.Data`).
 - `jsonrpchttp` subpackage — `http.Handler` and `Sender` for the common
   single-request HTTP transport.
 

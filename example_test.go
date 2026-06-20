@@ -58,7 +58,7 @@ func ExampleClient_Send() {
 
 // ExampleMiddleware shows a cross-cutting concern composed with a typed
 // handler. The middleware operates on raw params, so it works without
-// touching the typed pipeline or hand-wiring Dispatch.
+// touching the typed pipeline.
 func ExampleMiddleware() {
 	// logging is reusable middleware: it knows nothing about the handler's
 	// parameter or result types. The returned func literal converts to

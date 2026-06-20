@@ -12,11 +12,12 @@
 // — func(HandlerFunc) HandlerFunc — passed per method to Register /
 // RegisterHandler or server-wide via Server.Use.
 //
-// Register, DecodeParams, MarshalResult, and Dispatch are free functions
-// that build a typed pipeline (raw bytes → typed params → typed result →
-// raw bytes) on top of RegisterHandler. Use Register for normal methods;
-// drop to the lower-level helpers when you need a pre-decode hook (e.g.
-// JSON schema validation) or post-call transformation.
+// Register, Typed, DecodeParams, and MarshalResult are free functions that
+// build a typed pipeline (raw bytes → typed params → typed result → raw
+// bytes) on top of RegisterHandler. Use Register for normal methods. Typed
+// adapts a typed function into a HandlerFunc you can hold, reuse, or wrap in
+// Middleware — the way to run a pre-decode hook (e.g. JSON schema
+// validation) is Middleware around Typed(fn).
 //
 // Server.ServeMessage is the byte-level entry point for transports that
 // work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing
@@ -40,7 +41,7 @@
 // Request.Params, Request.ID, Response.Result, and Error.Data are stored
 // as json.RawMessage because the spec leaves their types open. Decode
 // them into concrete types at the point of use; the typed helpers
-// (Register, DecodeParams, Dispatch) do this for you.
+// (Register, Typed, DecodeParams) do this for you.
 //
 // # Not included
 //

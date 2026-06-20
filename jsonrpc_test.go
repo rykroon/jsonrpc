@@ -316,28 +316,27 @@ func TestNewParamsPassthrough(t *testing.T) {
 	require.Nil(t, out)
 }
 
-func TestDispatchWithCustomValidator(t *testing.T) {
+func TestTypedWithValidationMiddleware(t *testing.T) {
 	s := NewServer()
-	// Pre-decode validator owns the full *Error including structured Data.
-	requirePositive := func(raw json.RawMessage) *Error {
-		var p addParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return NewError(CodeInvalidParams, err.Error())
+	// Pre-decode validation middleware owns the full *Error including
+	// structured Data, then delegates to the typed handler.
+	requirePositive := func(next HandlerFunc) HandlerFunc {
+		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+			var p addParams
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, NewError(CodeInvalidParams, err.Error())
+			}
+			if p.A < 0 || p.B < 0 {
+				return nil, NewError(CodeInvalidParams, "operands must be non-negative").
+					WithData(map[string]any{"a": p.A, "b": p.B})
+			}
+			return next(ctx, raw)
 		}
-		if p.A < 0 || p.B < 0 {
-			return NewError(CodeInvalidParams, "operands must be non-negative").
-				WithData(map[string]any{"a": p.A, "b": p.B})
-		}
-		return nil
 	}
-	s.RegisterHandler("add", func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
-		if vErr := requirePositive(raw); vErr != nil {
-			return nil, vErr
-		}
-		return Dispatch(ctx, raw, func(_ context.Context, p addParams) (addResult, error) {
-			return addResult{Sum: p.A + p.B}, nil
-		})
+	add := Typed(func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
 	})
+	s.RegisterHandler("add", add, requirePositive)
 
 	c := NewClient(InProcess(s))
 
