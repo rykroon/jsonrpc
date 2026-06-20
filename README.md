@@ -42,13 +42,13 @@ func main() {
 ## Middleware
 
 Cross-cutting concerns — auth, logging, validation — are written once as
-`Middleware` (`func(HandlerFunc) HandlerFunc`) and composed with handlers.
+`Middleware` (`func(Handler) Handler`) and composed with handlers.
 Because middleware works on the raw params, it layers cleanly over typed
 handlers without touching the typed pipeline:
 
 ```go
 // logging knows nothing about any handler's param or result types.
-func logging(next jsonrpc.HandlerFunc) jsonrpc.HandlerFunc {
+func logging(next jsonrpc.Handler) jsonrpc.Handler {
     return func(ctx context.Context, params json.RawMessage) (json.RawMessage, *jsonrpc.Error) {
         log.Printf("rpc params: %s", params)
         return next(ctx, params)
@@ -80,7 +80,7 @@ middleware.
 - `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream).
 - `Typed`, `DecodeParams`, `MarshalResult` — building blocks for the typed
-  pipeline. `Typed(fn)` turns a typed function into a `HandlerFunc` you can
+  pipeline. `Typed(fn)` turns a typed function into a `Handler` you can
   reuse or wrap in `Middleware` (e.g. JSON schema validation with structured
   `Error.Data`).
 - `jsonrpchttp` subpackage — `http.Handler` and `Sender` for the common

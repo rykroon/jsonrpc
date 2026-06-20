@@ -30,15 +30,15 @@ func MarshalResult(v any) (json.RawMessage, *Error) {
 	return out, nil
 }
 
-// Typed adapts a typed function into a HandlerFunc, running the full typed
+// Typed adapts a typed function into a Handler, running the full typed
 // pipeline on each call: decode raw into P, call fn, convert its error
 // (preserving *Error via errors.As), marshal the result.
 //
-// The returned HandlerFunc is an ordinary value: register it, wrap it in
+// The returned Handler is an ordinary value: register it, wrap it in
 // Middleware, or reuse it under several names. To run logic before the decode
 // (auth, JSON schema validation, etc.), wrap Typed(fn) in Middleware rather
 // than hand-wiring the pipeline.
-func Typed[P, R any](fn func(context.Context, P) (R, error)) HandlerFunc {
+func Typed[P, R any](fn func(context.Context, P) (R, error)) Handler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 		p, rpcErr := DecodeParams[P](raw)
 		if rpcErr != nil {
@@ -56,7 +56,7 @@ func Typed[P, R any](fn func(context.Context, P) (R, error)) HandlerFunc {
 	}
 }
 
-// Register adapts a typed function into a HandlerFunc with Typed and installs
+// Register adapts a typed function into a Handler with Typed and installs
 // it on s, wrapped with the given per-method middleware (mw[0] outermost)
 // followed by the server-wide middleware.
 //

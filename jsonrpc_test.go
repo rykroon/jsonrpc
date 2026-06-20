@@ -320,7 +320,7 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 	s := NewServer()
 	// Pre-decode validation middleware owns the full *Error including
 	// structured Data, then delegates to the typed handler.
-	requirePositive := func(next HandlerFunc) HandlerFunc {
+	requirePositive := func(next Handler) Handler {
 		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
@@ -361,7 +361,7 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 // tagMiddleware appends its name to *log when the request passes through,
 // letting tests assert ordering of the wrapping.
 func tagMiddleware(name string, log *[]string) Middleware {
-	return func(next HandlerFunc) HandlerFunc {
+	return func(next Handler) Handler {
 		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 			*log = append(*log, name)
 			return next(ctx, raw)
@@ -372,7 +372,7 @@ func tagMiddleware(name string, log *[]string) Middleware {
 func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
 	s := NewServer()
 	// A raw middleware that rejects without ever decoding into the typed P.
-	requirePositive := func(next HandlerFunc) HandlerFunc {
+	requirePositive := func(next Handler) Handler {
 		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
@@ -426,7 +426,7 @@ func TestUseAfterRegisterPanics(t *testing.T) {
 		return addResult{Sum: p.A + p.B}, nil
 	})
 	require.Panics(t, func() {
-		s.Use(func(next HandlerFunc) HandlerFunc { return next })
+		s.Use(func(next Handler) Handler { return next })
 	})
 }
 
