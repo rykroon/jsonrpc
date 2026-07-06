@@ -2,6 +2,7 @@ package jsonrpchttp_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,6 +126,34 @@ func TestHandlerEnforcesMaxBodyBytes(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+}
+
+func TestHandlerBatchRoundTrip(t *testing.T) {
+	ts, _ := newTestHTTP(t)
+
+	resp, err := http.Post(ts.URL, "application/json", strings.NewReader(
+		`[{"jsonrpc":"2.0","method":"addOne","params":1,"id":1},
+		  {"jsonrpc":"2.0","method":"addOne","params":10,"id":2}]`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var resps []jsonrpc.Response
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&resps))
+	require.Len(t, resps, 2)
+	assert.JSONEq(t, "2", string(resps[0].Result))
+	assert.JSONEq(t, "11", string(resps[1].Result))
+}
+
+func TestHandlerBatchAllNotificationsReturns204(t *testing.T) {
+	ts, _ := newTestHTTP(t)
+
+	resp, err := http.Post(ts.URL, "application/json", strings.NewReader(
+		`[{"jsonrpc":"2.0","method":"addOne","params":1},
+		  {"jsonrpc":"2.0","method":"addOne","params":2}]`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
 func TestSenderRejectsNon2xxStatus(t *testing.T) {

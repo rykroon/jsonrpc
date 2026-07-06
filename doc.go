@@ -20,8 +20,9 @@
 // validation) is Middleware around Typed(fn).
 //
 // Server.ServeMessage is the byte-level entry point for transports that
-// work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing
-// and the spec's in-band parse error reporting. HTTP adapters that prefer
+// work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing,
+// the spec's in-band parse error reporting, and batch messages (JSON
+// arrays), which are dispatched per element. HTTP adapters that prefer
 // to surface parse failures as HTTP 400 should skip ServeMessage and call
 // Serve directly.
 //
@@ -48,8 +49,9 @@
 //
 // # Not included
 //
-// Batch requests are not supported. The seams — Sender on the client
-// side, Server.Serve and Server.ServeMessage on the server side — are
-// designed so users can build additional transports on top of the core
-// package.
+// Client-side batching is not supported: Sender is a single
+// request/response seam. (Server-side batch messages are handled by
+// ServeMessage.) The seams — Sender on the client side, Server.Serve and
+// Server.ServeMessage on the server side — are designed so users can
+// build additional transports on top of the core package.
 package jsonrpc

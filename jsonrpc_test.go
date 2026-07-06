@@ -298,17 +298,136 @@ func TestMessageServerParseError(t *testing.T) {
 	require.JSONEq(t, "null", string(resp.ID))
 }
 
-func TestMessageServerBatchRejected(t *testing.T) {
+func TestBatchTwoCalls(t *testing.T) {
 	s := newTestServer(t)
-	data := []byte(` [{"jsonrpc":"2.0","method":"add","id":1}]`)
+	data := []byte(`[
+		{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1},
+		{"jsonrpc":"2.0","method":"add","params":{"a":10,"b":20},"id":2}
+	]`)
+	out, err := s.ServeMessage(context.Background(), data)
+	require.NoError(t, err)
+
+	var resps []Response
+	require.NoError(t, json.Unmarshal(out, &resps))
+	require.Len(t, resps, 2)
+	require.Nil(t, resps[0].Error)
+	require.JSONEq(t, "1", string(resps[0].ID))
+	require.JSONEq(t, `{"sum":3}`, string(resps[0].Result))
+	require.Nil(t, resps[1].Error)
+	require.JSONEq(t, "2", string(resps[1].ID))
+	require.JSONEq(t, `{"sum":30}`, string(resps[1].Result))
+}
+
+func TestBatchMixedCallsAndNotifications(t *testing.T) {
+	s := newTestServer(t)
+	data := []byte(`[
+		{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2}},
+		{"jsonrpc":"2.0","method":"add","params":{"a":2,"b":3},"id":7}
+	]`)
+	out, err := s.ServeMessage(context.Background(), data)
+	require.NoError(t, err)
+
+	var resps []Response
+	require.NoError(t, json.Unmarshal(out, &resps))
+	require.Len(t, resps, 1)
+	require.JSONEq(t, "7", string(resps[0].ID))
+	require.JSONEq(t, `{"sum":5}`, string(resps[0].Result))
+}
+
+func TestBatchAllNotificationsProducesNoReply(t *testing.T) {
+	s := newTestServer(t)
+	data := []byte(`[
+		{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2}},
+		{"jsonrpc":"2.0","method":"missing"}
+	]`)
+	out, err := s.ServeMessage(context.Background(), data)
+	require.NoError(t, err)
+	require.Nil(t, out)
+}
+
+func TestBatchEmptyIsSingleError(t *testing.T) {
+	s := newTestServer(t)
+	out, err := s.ServeMessage(context.Background(), []byte(`[]`))
+	require.NoError(t, err)
+
+	// The spec answers an empty batch with one Response object, not an array.
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+	require.JSONEq(t, "null", string(resp.ID))
+}
+
+func TestBatchInvalidElements(t *testing.T) {
+	s := newTestServer(t)
+
+	t.Run("single invalid element", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(), []byte(`[1]`))
+		require.NoError(t, err)
+
+		var resps []Response
+		require.NoError(t, json.Unmarshal(out, &resps))
+		require.Len(t, resps, 1)
+		require.NotNil(t, resps[0].Error)
+		require.Equal(t, CodeInvalidRequest, resps[0].Error.Code)
+		require.JSONEq(t, "null", string(resps[0].ID))
+	})
+
+	t.Run("three invalid elements", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(), []byte(`[1,2,3]`))
+		require.NoError(t, err)
+
+		var resps []Response
+		require.NoError(t, json.Unmarshal(out, &resps))
+		require.Len(t, resps, 3)
+		for _, r := range resps {
+			require.NotNil(t, r.Error)
+			require.Equal(t, CodeInvalidRequest, r.Error.Code)
+		}
+	})
+}
+
+func TestBatchMalformedJSONIsSingleParseError(t *testing.T) {
+	s := newTestServer(t)
+	data := []byte(`[{"jsonrpc":"2.0","method":"add","id":1},{"jsonrpc":`)
 	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
 	var resp Response
 	require.NoError(t, json.Unmarshal(out, &resp))
 	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
-	require.Contains(t, resp.Error.Message, "batch")
+	require.Equal(t, CodeParseError, resp.Error.Code)
+	require.JSONEq(t, "null", string(resp.ID))
+}
+
+func TestBatchMixedValidAndInvalid(t *testing.T) {
+	s := newTestServer(t)
+	data := []byte(`[
+		{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":"ok"},
+		"garbage",
+		{"jsonrpc":"2.0","method":"add","params":{"a":0,"b":0}},
+		{"jsonrpc":"1.0","method":"add","id":9}
+	]`)
+	out, err := s.ServeMessage(context.Background(), data)
+	require.NoError(t, err)
+
+	var resps []Response
+	require.NoError(t, json.Unmarshal(out, &resps))
+	// The notification is omitted; the valid call, the garbage element, and
+	// the bad-version request each produce an entry, in request order.
+	require.Len(t, resps, 3)
+
+	require.Nil(t, resps[0].Error)
+	require.JSONEq(t, `"ok"`, string(resps[0].ID))
+	require.JSONEq(t, `{"sum":3}`, string(resps[0].Result))
+
+	require.NotNil(t, resps[1].Error)
+	require.Equal(t, CodeInvalidRequest, resps[1].Error.Code)
+	require.JSONEq(t, "null", string(resps[1].ID))
+
+	require.NotNil(t, resps[2].Error)
+	require.Equal(t, CodeInvalidRequest, resps[2].Error.Code)
+	require.JSONEq(t, "9", string(resps[2].ID))
 }
 
 func TestMessageServerInvalidShape(t *testing.T) {

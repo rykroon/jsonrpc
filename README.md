@@ -80,7 +80,8 @@ middleware.
   requests without touching `json.RawMessage` directly.
 - `Response.Decode` — unmarshal a successful result into a target.
 - `Server.ServeMessage` — byte-level entry point for transports that
-  work in raw messages (stdio, WebSocket, TCP stream).
+  work in raw messages (stdio, WebSocket, TCP stream). Handles batch
+  messages (JSON arrays) per the spec.
 - `Typed`, `DecodeParams`, `MarshalResult` — building blocks for the typed
   pipeline. `Typed(fn)` turns a typed function into a `Handler` you can
   reuse or wrap in `Middleware` (e.g. JSON schema validation with structured
@@ -90,7 +91,8 @@ middleware.
 
 ## What it does not include
 
-- Batch requests.
+- Client-side batching (`Sender` is a single request/response seam;
+  server-side batches are handled by `ServeMessage`).
 
 The seams are designed so additional transports can be built on top
 without changes to the core package.

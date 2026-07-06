@@ -124,8 +124,10 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 // (WebSocket, stdio, TCP). HTTP adapters that prefer to surface parse
 // failures as HTTP 400 should call Serve directly instead.
 //
-// Currently single requests only — batch messages (JSON arrays) are
-// rejected with CodeInvalidRequest. Batch support is planned.
+// Batch messages (JSON arrays) are dispatched element by element, in
+// order, and produce a JSON array of the responses in request order. A
+// batch of only notifications produces (nil, nil), and an empty batch is
+// an invalid request.
 //
 // JSON-RPC errors (parse errors, invalid request, etc.) are returned
 // in-band as a marshaled error Response, not as the error return. The
@@ -133,7 +135,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 // not occur in normal operation.
 func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
 	if isJSONArray(data) {
-		return marshalMessageError(NewError(CodeInvalidRequest, "batch requests are not supported"))
+		return s.serveBatch(ctx, data)
 	}
 	var req Request
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -148,6 +150,34 @@ func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.R
 		return nil, nil
 	}
 	return json.Marshal(resp)
+}
+
+// serveBatch dispatches a batch message sequentially, in order. Each element
+// is unmarshaled independently so one invalid element yields one error entry
+// without failing the rest of the batch.
+func (s *Server) serveBatch(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
+	var elems []json.RawMessage
+	if err := json.Unmarshal(data, &elems); err != nil {
+		return marshalMessageError(NewError(CodeParseError, err.Error()))
+	}
+	if len(elems) == 0 {
+		return marshalMessageError(NewError(CodeInvalidRequest, "empty batch"))
+	}
+	responses := make([]*Response, 0, len(elems))
+	for _, elem := range elems {
+		var req Request
+		if err := json.Unmarshal(elem, &req); err != nil {
+			responses = append(responses, errorResponse(nil, NewError(CodeInvalidRequest, err.Error())))
+			continue
+		}
+		if resp := s.Serve(ctx, &req); resp != nil {
+			responses = append(responses, resp)
+		}
+	}
+	if len(responses) == 0 {
+		return nil, nil // all notifications: no reply at all, not an empty array
+	}
+	return json.Marshal(responses)
 }
 
 func errorResponse(id json.RawMessage, e *Error) *Response {
