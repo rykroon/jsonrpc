@@ -31,10 +31,13 @@
 // adapter (both an http.Handler and a Sender); transport authors writing
 // for other wires implement Sender themselves.
 //
-// Build a Request with NewRequest or NewNotification; use NewID and
-// NewParams to encode the polymorphic id and params fields from Go
-// values. Round-trip with Client.Send, then check Response.Error and
-// decode Response.Result with Response.Decode.
+// Client.Call and Client.Notify are the convenience path: Call marshals
+// params, generates an id, sends, and decodes the result, returning
+// server-reported errors as *Error; Notify sends a notification. For full
+// control, build a Request with NewRequest or NewNotification (with NewID
+// and NewParams for the polymorphic fields), round-trip it with
+// Client.Send, then check Response.Error and decode Response.Result with
+// Response.Decode.
 //
 // # Polymorphic fields
 //

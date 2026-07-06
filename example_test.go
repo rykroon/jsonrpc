@@ -30,6 +30,25 @@ func ExampleServer() {
 	// Output: {"jsonrpc":"2.0","result":5,"id":1}
 }
 
+// ExampleClient_Call makes a one-line method call: params are marshaled,
+// the id is generated, and the result is decoded into the target.
+func ExampleClient_Call() {
+	s := jsonrpc.NewServer()
+	jsonrpc.Register(s, "greet", func(_ context.Context, name string) (string, error) {
+		return "hello " + name, nil
+	})
+
+	c := jsonrpc.NewClient(jsonrpc.InProcess(s))
+
+	var greeting string
+	if err := c.Call(context.Background(), "greet", "world", &greeting); err != nil {
+		fmt.Println("call failed:", err)
+		return
+	}
+	fmt.Println(greeting)
+	// Output: hello world
+}
+
 // ExampleClient_Send builds a Request with the constructors and sends it
 // through an in-process Server.
 func ExampleClient_Send() {

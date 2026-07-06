@@ -10,6 +10,7 @@
 package jsonrpchttp
 
 import (
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -48,11 +49,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := io.ReadAll(body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	out, _ := h.Server.ServeMessage(r.Context(), data)
+	out, err := h.Server.ServeMessage(r.Context(), data)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if out == nil {
 		w.WriteHeader(http.StatusNoContent)
 		return

@@ -1,6 +1,10 @@
 package jsonrpc
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"sync/atomic"
+)
 
 // Sender round-trips a Request to a Response across a transport. The error
 // return is for transport failures (network error, framing, etc.) that occur
@@ -30,15 +34,52 @@ func InProcess(s *Server) Sender {
 	})
 }
 
-// Client wraps a Sender. Build a *Request with NewRequest or NewNotification
-// (and NewID / NewParams for the polymorphic fields) and round-trip it with
-// Send.
+// Client wraps a Sender. Call and Notify are the convenience path: they
+// marshal params, generate ids, and decode results. Send is the low-level
+// escape hatch for pre-built *Request values (custom ids, raw params).
 type Client struct {
 	sender Sender
+	nextID atomic.Int64
 }
 
 func NewClient(sender Sender) *Client {
 	return &Client{sender: sender}
+}
+
+// Call invokes method with params, decoding the result into result. Params
+// are marshaled with NewParams (nil means no params; a json.RawMessage passes
+// through). The request id is generated from an internal counter. A nil
+// result skips decoding.
+//
+// Errors reported by the server are returned as *Error — recover the code
+// and data with errors.As. Any other error is a transport or decode failure.
+func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
+	raw, err := NewParams(params)
+	if err != nil {
+		return fmt.Errorf("jsonrpc: marshal params: %w", err)
+	}
+	resp, err := c.sender.Send(ctx, NewRequest(method, raw, NewID(c.nextID.Add(1))))
+	if err != nil {
+		return err
+	}
+	if resp == nil {
+		return fmt.Errorf("jsonrpc: transport returned no response for call %q", method)
+	}
+	if resp.Error != nil {
+		return resp.Error
+	}
+	return resp.Decode(result)
+}
+
+// Notify sends a notification: the server dispatches method but produces no
+// response. The returned error reports transport failures only.
+func (c *Client) Notify(ctx context.Context, method string, params any) error {
+	raw, err := NewParams(params)
+	if err != nil {
+		return fmt.Errorf("jsonrpc: marshal params: %w", err)
+	}
+	_, err = c.sender.Send(ctx, NewNotification(method, raw))
+	return err
 }
 
 // Send round-trips req via the underlying Sender. Transport failures are

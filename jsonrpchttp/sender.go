@@ -53,6 +53,13 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Respo
 	}
 	defer resp.Body.Close()
 
+	// A non-2xx reply (proxy 502, server 500, ...) carries no JSON-RPC
+	// response; surface it as a transport error rather than a decode failure.
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("jsonrpchttp: unexpected HTTP status %s", resp.Status)
+	}
+
 	if req.IsNotification() {
 		io.Copy(io.Discard, resp.Body)
 		return nil, nil
@@ -62,8 +69,13 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Respo
 		return nil, nil
 	}
 
+	// Read the body fully so the underlying connection can be reused.
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("jsonrpchttp: read response: %w", err)
+	}
 	var jr jsonrpc.Response
-	if err := json.NewDecoder(resp.Body).Decode(&jr); err != nil {
+	if err := json.Unmarshal(data, &jr); err != nil {
 		return nil, fmt.Errorf("jsonrpchttp: decode response: %w", err)
 	}
 	return &jr, nil

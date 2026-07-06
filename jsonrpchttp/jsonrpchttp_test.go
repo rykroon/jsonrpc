@@ -124,5 +124,30 @@ func TestHandlerEnforcesMaxBodyBytes(t *testing.T) {
 	resp, err := http.Post(ts.URL, "application/json", strings.NewReader(big))
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+}
+
+func TestSenderRejectsNon2xxStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "<html>bad gateway</html>", http.StatusBadGateway)
+	}))
+	defer ts.Close()
+	client := jsonrpc.NewClient(&jsonrpchttp.Sender{URL: ts.URL})
+
+	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", nil, jsonrpc.NewID(1)))
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "502")
+
+	err = client.Notify(context.Background(), "addOne", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "502")
+}
+
+func TestClientCallOverHTTP(t *testing.T) {
+	_, client := newTestHTTP(t)
+
+	var result int
+	require.NoError(t, client.Call(context.Background(), "addOne", 7, &result))
+	assert.Equal(t, 8, result)
 }

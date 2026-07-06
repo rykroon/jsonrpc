@@ -102,7 +102,7 @@ func TestNotificationProducesNoResponse(t *testing.T) {
 	<-called
 }
 
-func TestClientNotify(t *testing.T) {
+func TestClientSendNotification(t *testing.T) {
 	s := NewServer()
 	called := make(chan struct{}, 1)
 	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
@@ -114,6 +114,108 @@ func TestClientNotify(t *testing.T) {
 	resp, err := c.Send(context.Background(), NewNotification("ping", nil))
 	require.NoError(t, err)
 	require.Nil(t, resp)
+	<-called
+}
+
+func TestNotificationUnknownMethodProducesNoResponse(t *testing.T) {
+	s := newTestServer(t)
+
+	resp := s.Serve(context.Background(), NewNotification("missing", nil))
+	require.Nil(t, resp)
+
+	out, err := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"missing"}`))
+	require.NoError(t, err)
+	require.Nil(t, out)
+}
+
+func TestNilResultEncodesAsNull(t *testing.T) {
+	s := NewServer()
+	s.RegisterHandler("void", func(_ context.Context, _ json.RawMessage) (json.RawMessage, *Error) {
+		return nil, nil
+	})
+
+	out, err := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"void","id":1}`))
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"result":null`)
+}
+
+func TestTypedNilErrorBecomesInternalError(t *testing.T) {
+	s := NewServer()
+	Register(s, "nilerr", func(_ context.Context, _ struct{}) (any, error) {
+		return nil, (*Error)(nil)
+	})
+
+	resp := s.Serve(context.Background(), NewRequest("nilerr", nil, NewID(1)))
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeInternalError, resp.Error.Code)
+}
+
+func TestInvalidIDNotEchoedOnVersionError(t *testing.T) {
+	s := newTestServer(t)
+	resp := s.Serve(context.Background(), &Request{
+		JSONRPC: "1.0",
+		Method:  "add",
+		ID:      json.RawMessage(`{"x":1}`),
+	})
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Error)
+	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+	require.JSONEq(t, "null", string(resp.ID))
+}
+
+func TestClientCall(t *testing.T) {
+	s := newTestServer(t)
+	c := NewClient(InProcess(s))
+
+	var got addResult
+	require.NoError(t, c.Call(context.Background(), "add", addParams{A: 2, B: 3}, &got))
+	require.Equal(t, addResult{Sum: 5}, got)
+
+	// A nil result target skips decoding.
+	require.NoError(t, c.Call(context.Background(), "add", addParams{A: 1, B: 1}, nil))
+}
+
+func TestClientCallServerError(t *testing.T) {
+	s := newTestServer(t)
+	c := NewClient(InProcess(s))
+
+	err := c.Call(context.Background(), "fail", struct{}{}, nil)
+	require.Error(t, err)
+
+	var rpcErr *Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, -32001, rpcErr.Code)
+	require.Equal(t, "custom", rpcErr.Message)
+
+	var detail map[string]int
+	require.NoError(t, rpcErr.UnmarshalData(&detail))
+	require.Equal(t, 1, detail["x"])
+}
+
+func TestClientCallGeneratesUniqueIDs(t *testing.T) {
+	s := newTestServer(t)
+	var ids []string
+	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
+		ids = append(ids, string(req.ID))
+		return s.Serve(ctx, req), nil
+	}))
+
+	require.NoError(t, c.Call(context.Background(), "add", addParams{}, nil))
+	require.NoError(t, c.Call(context.Background(), "add", addParams{}, nil))
+	require.Equal(t, []string{"1", "2"}, ids)
+}
+
+func TestClientNotify(t *testing.T) {
+	s := NewServer()
+	called := make(chan struct{}, 1)
+	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
+		called <- struct{}{}
+		return struct{}{}, nil
+	})
+	c := NewClient(InProcess(s))
+
+	require.NoError(t, c.Notify(context.Background(), "ping", nil))
 	<-called
 }
 

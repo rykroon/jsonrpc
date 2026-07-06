@@ -78,20 +78,26 @@ func (s *Server) RegisterHandler(name string, h Handler, mw ...Middleware) {
 // Serve does not recover from panics in registered handlers. If your
 // transport requires recovery, wrap Serve.
 func (s *Server) Serve(ctx context.Context, req *Request) *Response {
+	// Validate the ID first so later error responses never echo an invalid ID.
+	if !req.IsNotification() && !isValidID(req.ID) {
+		return errorResponse(nil, NewError(CodeInvalidRequest, "id must be a string, number, or null"))
+	}
 	if req.JSONRPC != Version {
 		return errorResponse(req.ID, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`))
 	}
 	if req.Method == "" {
 		return errorResponse(req.ID, NewError(CodeInvalidRequest, "missing method"))
 	}
-	if !req.IsNotification() && !isValidID(req.ID) {
-		return errorResponse(nil, NewError(CodeInvalidRequest, "id must be a string, number, or null"))
-	}
 
 	s.mu.RLock()
 	h, ok := s.methods[req.Method]
 	s.mu.RUnlock()
 	if !ok {
+		// The spec forbids replying to a notification, even when its method
+		// is unknown.
+		if req.IsNotification() {
+			return nil
+		}
 		return errorResponse(req.ID, NewError(CodeMethodNotFound, "method not found: "+req.Method))
 	}
 
@@ -101,6 +107,11 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	}
 	if rpcErr != nil {
 		return errorResponse(req.ID, rpcErr)
+	}
+	// A success response must carry a result member; omitempty would drop a
+	// nil one, so encode it as JSON null.
+	if len(result) == 0 {
+		result = json.RawMessage("null")
 	}
 	return &Response{JSONRPC: Version, Result: result, ID: req.ID}
 }

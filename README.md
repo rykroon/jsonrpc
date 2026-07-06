@@ -31,10 +31,10 @@ func main() {
 
     c := jsonrpc.NewClient(jsonrpc.InProcess(s))
 
-    params, _ := jsonrpc.NewParams(AddParams{A: 2, B: 3})
-    resp, _ := c.Send(context.Background(), jsonrpc.NewRequest("add", params, jsonrpc.NewID(1)))
     var sum int
-    _ = resp.Decode(&sum)
+    if err := c.Call(context.Background(), "add", AddParams{A: 2, B: 3}, &sum); err != nil {
+        panic(err)
+    }
     fmt.Println(sum) // 5
 }
 ```
@@ -72,8 +72,10 @@ middleware.
   (`Register`) registration APIs.
 - `Middleware` / `Server.Use` — compose auth, logging, and validation
   around handlers (per-method or server-wide).
-- `Client.Send` — round-trips a `*Request` through a `Sender`
-  (in-process, HTTP, WebSocket, etc.).
+- `Client.Call` / `Client.Notify` — one-line method calls with params
+  marshaling, id generation, and result decoding; server errors come back
+  as `*Error`. `Client.Send` is the low-level escape hatch, round-tripping
+  a `*Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
   requests without touching `json.RawMessage` directly.
 - `Response.Decode` — unmarshal a successful result into a target.

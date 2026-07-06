@@ -48,6 +48,11 @@ func Typed[P, R any](fn func(context.Context, P) (R, error)) Handler {
 		if err != nil {
 			var e *Error
 			if errors.As(err, &e) {
+				// A typed-nil *Error inside a non-nil error must not read as
+				// success; calling err.Error() on it would also panic.
+				if e == nil {
+					return nil, NewError(CodeInternalError, "handler returned a nil *jsonrpc.Error")
+				}
 				return nil, e
 			}
 			return nil, NewError(CodeInternalError, err.Error())
