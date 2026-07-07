@@ -37,14 +37,24 @@ func NewError(code int, message string) *Error {
 	return &Error{Code: code, Message: message}
 }
 
-// WithData attaches data as the Error's Data field. It panics if data cannot
-// be JSON-marshaled, since that indicates a programmer error at the call site.
-func (e *Error) WithData(data any) *Error {
+// SetData marshals data and assigns it to the Error's Data field. On marshal
+// failure it returns the error and leaves Data unchanged.
+func (e *Error) SetData(data any) error {
 	b, err := json.Marshal(data)
 	if err != nil {
-		panic(fmt.Sprintf("jsonrpc: marshal error data: %v", err))
+		return err
 	}
 	e.Data = b
+	return nil
+}
+
+// MustSetData is SetData for data known to be marshalable (static shapes,
+// registration-time values). It panics on marshal failure and returns the
+// receiver so it can be chained: NewError(code, msg).MustSetData(v).
+func (e *Error) MustSetData(data any) *Error {
+	if err := e.SetData(data); err != nil {
+		panic(fmt.Sprintf("jsonrpc: marshal error data: %v", err))
+	}
 	return e
 }
 

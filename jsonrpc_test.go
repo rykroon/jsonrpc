@@ -25,7 +25,7 @@ func newTestServer(t *testing.T) *Server {
 		return addResult{Sum: p.A + p.B}, nil
 	})
 	Register(s, "fail", func(_ context.Context, _ struct{}) (any, error) {
-		return nil, NewError(-32001, "custom").WithData(map[string]int{"x": 1})
+		return nil, NewError(-32001, "custom").MustSetData(map[string]int{"x": 1})
 	})
 	Register(s, "boom", func(_ context.Context, _ struct{}) (any, error) {
 		return nil, errors.New("internal boom")
@@ -191,6 +191,25 @@ func TestClientCallServerError(t *testing.T) {
 	var detail map[string]int
 	require.NoError(t, rpcErr.UnmarshalData(&detail))
 	require.Equal(t, 1, detail["x"])
+}
+
+func TestErrorSetData(t *testing.T) {
+	e := NewError(-32001, "custom")
+	require.NoError(t, e.SetData(map[string]int{"x": 1}))
+	require.JSONEq(t, `{"x":1}`, string(e.Data))
+
+	// On marshal failure Data keeps its previous value.
+	require.Error(t, e.SetData(make(chan int)))
+	require.JSONEq(t, `{"x":1}`, string(e.Data))
+}
+
+func TestErrorMustSetData(t *testing.T) {
+	e := NewError(-32001, "custom").MustSetData([]int{1, 2})
+	require.JSONEq(t, `[1,2]`, string(e.Data))
+
+	require.Panics(t, func() {
+		NewError(-32001, "custom").MustSetData(make(chan int))
+	})
 }
 
 func TestClientCallGeneratesUniqueIDs(t *testing.T) {
@@ -549,7 +568,7 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 			}
 			if p.A < 0 || p.B < 0 {
 				return nil, NewError(CodeInvalidParams, "operands must be non-negative").
-					WithData(map[string]any{"a": p.A, "b": p.B})
+					MustSetData(map[string]any{"a": p.A, "b": p.B})
 			}
 			return next(ctx, raw)
 		}
