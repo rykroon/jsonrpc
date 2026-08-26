@@ -19,6 +19,8 @@ import (
 // the receiver and satisfies Handler without any cast.
 type Handler func(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error)
 
+type GenericHandler[P, R any] func(context.Context, P) (R, error)
+
 // Middleware wraps a Handler to add cross-cutting behavior (auth,
 // logging, validation, etc.). It operates on the raw params, so it composes
 // with both typed handlers (via Register) and raw handlers without touching
@@ -77,7 +79,7 @@ func (s *Server) RegisterHandler(name string, h Handler, mw ...Middleware) {
 // outermost) followed by the server-wide middleware.
 //
 // Equivalent to s.RegisterHandler(name, Typed(fn), mw...).
-func (s *Server) Register[P, R any](name string, fn func(context.Context, P) (R, error), mw ...Middleware) {
+func (s *Server) Register[P, R any](name string, fn GenericHandler[P, R], mw ...Middleware) {
 	s.RegisterHandler(name, Typed(fn), mw...)
 }
 
