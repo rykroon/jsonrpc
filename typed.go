@@ -52,8 +52,7 @@ func Typed[P, R any](fn func(context.Context, P) (R, error)) Handler {
 		}
 		r, err := fn(ctx, p)
 		if err != nil {
-			var e *Error
-			if errors.As(err, &e) {
+			if e, ok := errors.AsType[*Error](err); ok {
 				// A typed-nil *Error inside a non-nil error must not read as
 				// success; calling err.Error() on it would also panic.
 				if e == nil {
