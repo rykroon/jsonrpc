@@ -60,12 +60,3 @@ func Typed[P, R any](fn func(context.Context, P) (R, error)) Handler {
 		return MarshalResult(r)
 	}
 }
-
-// Register adapts a typed function into a Handler with Typed and installs
-// it on s, wrapped with the given per-method middleware (mw[0] outermost)
-// followed by the server-wide middleware.
-//
-// Equivalent to s.RegisterHandler(name, Typed(fn), mw...).
-func Register[P, R any](s *Server, name string, fn func(context.Context, P) (R, error), mw ...Middleware) {
-	s.RegisterHandler(name, Typed(fn), mw...)
-}

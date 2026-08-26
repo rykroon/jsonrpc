@@ -72,6 +72,15 @@ func (s *Server) RegisterHandler(name string, h Handler, mw ...Middleware) {
 	s.methods[name] = chain(chain(h, mw), s.middleware)
 }
 
+// Register adapts a typed function into a Handler with Typed and installs
+// it on the server, wrapped with the given per-method middleware (mw[0]
+// outermost) followed by the server-wide middleware.
+//
+// Equivalent to s.RegisterHandler(name, Typed(fn), mw...).
+func (s *Server) Register[P, R any](name string, fn func(context.Context, P) (R, error), mw ...Middleware) {
+	s.RegisterHandler(name, Typed(fn), mw...)
+}
+
 // Serve dispatches a single request. For notifications the returned
 // *Response is nil — the handler still runs, but no reply is produced.
 //

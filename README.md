@@ -25,11 +25,11 @@ type AddParams struct {
 
 func main() {
     s := jsonrpc.NewServer()
-    jsonrpc.Register(s, "add", func(_ context.Context, p AddParams) (int, error) {
+    s.Register("add", func(_ context.Context, p AddParams) (int, error) {
         return p.A + p.B, nil
     })
 
-    c := jsonrpc.NewClient(jsonrpc.InProcess(s))
+    c := jsonrpc.NewClient(s.Sender())
 
     var sum int
     if err := c.Call(context.Background(), "add", AddParams{A: 2, B: 3}, &sum); err != nil {
@@ -59,7 +59,7 @@ s := jsonrpc.NewServer()
 s.Use(logging) // server-wide: applied to every method
 
 // or per method (mw[0] is outermost), wrapped inside any server-wide middleware:
-jsonrpc.Register(s, "add", add, requireAuth)
+s.Register("add", add, requireAuth)
 ```
 
 `Use` must be called before registering methods. The first middleware listed

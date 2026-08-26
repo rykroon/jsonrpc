@@ -21,13 +21,13 @@ type addResult struct {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	s := NewServer()
-	Register(s, "add", func(_ context.Context, p addParams) (addResult, error) {
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
 		return addResult{Sum: p.A + p.B}, nil
 	})
-	Register(s, "fail", func(_ context.Context, _ struct{}) (any, error) {
+	s.Register("fail", func(_ context.Context, _ struct{}) (any, error) {
 		return nil, NewError(-32001, "custom").MustSetData(map[string]int{"x": 1})
 	})
-	Register(s, "boom", func(_ context.Context, _ struct{}) (any, error) {
+	s.Register("boom", func(_ context.Context, _ struct{}) (any, error) {
 		return nil, errors.New("internal boom")
 	})
 	return s
@@ -42,7 +42,7 @@ func mustParams(t *testing.T, v any) json.RawMessage {
 
 func TestClientSend(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	req := NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1))
 	resp, err := c.Send(context.Background(), req)
@@ -56,7 +56,7 @@ func TestClientSend(t *testing.T) {
 
 func TestClientSendRPCError(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	req := NewRequest("fail", mustParams(t, struct{}{}), NewID(1))
 	resp, err := c.Send(context.Background(), req)
@@ -69,7 +69,7 @@ func TestClientSendRPCError(t *testing.T) {
 
 func TestClientSendInternalError(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	req := NewRequest("boom", mustParams(t, struct{}{}), NewID(1))
 	resp, err := c.Send(context.Background(), req)
@@ -80,7 +80,7 @@ func TestClientSendInternalError(t *testing.T) {
 
 func TestMethodNotFound(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	req := NewRequest("missing", nil, NewID(1))
 	resp, err := c.Send(context.Background(), req)
@@ -92,7 +92,7 @@ func TestMethodNotFound(t *testing.T) {
 func TestNotificationProducesNoResponse(t *testing.T) {
 	s := NewServer()
 	called := make(chan struct{}, 1)
-	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
+	s.Register("ping", func(_ context.Context, _ struct{}) (struct{}, error) {
 		called <- struct{}{}
 		return struct{}{}, nil
 	})
@@ -105,11 +105,11 @@ func TestNotificationProducesNoResponse(t *testing.T) {
 func TestClientSendNotification(t *testing.T) {
 	s := NewServer()
 	called := make(chan struct{}, 1)
-	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
+	s.Register("ping", func(_ context.Context, _ struct{}) (struct{}, error) {
 		called <- struct{}{}
 		return struct{}{}, nil
 	})
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	resp, err := c.Send(context.Background(), NewNotification("ping", nil))
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestNilResultEncodesAsNull(t *testing.T) {
 
 func TestTypedNilErrorBecomesInternalError(t *testing.T) {
 	s := NewServer()
-	Register(s, "nilerr", func(_ context.Context, _ struct{}) (any, error) {
+	s.Register("nilerr", func(_ context.Context, _ struct{}) (any, error) {
 		return nil, (*Error)(nil)
 	})
 
@@ -166,7 +166,7 @@ func TestInvalidIDNotEchoedOnVersionError(t *testing.T) {
 
 func TestClientCall(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	var got addResult
 	require.NoError(t, c.Call(context.Background(), "add", addParams{A: 2, B: 3}, &got))
@@ -178,7 +178,7 @@ func TestClientCall(t *testing.T) {
 
 func TestClientCallServerError(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	err := c.Call(context.Background(), "fail", struct{}{}, nil)
 	require.Error(t, err)
@@ -228,11 +228,11 @@ func TestClientCallGeneratesUniqueIDs(t *testing.T) {
 func TestClientNotify(t *testing.T) {
 	s := NewServer()
 	called := make(chan struct{}, 1)
-	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
+	s.Register("ping", func(_ context.Context, _ struct{}) (struct{}, error) {
 		called <- struct{}{}
 		return struct{}{}, nil
 	})
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	require.NoError(t, c.Notify(context.Background(), "ping", nil))
 	<-called
@@ -293,7 +293,7 @@ func TestMessageServerSingleRequest(t *testing.T) {
 func TestMessageServerNotification(t *testing.T) {
 	s := NewServer()
 	called := make(chan struct{}, 1)
-	Register(s, "ping", func(_ context.Context, _ struct{}) (struct{}, error) {
+	s.Register("ping", func(_ context.Context, _ struct{}) (struct{}, error) {
 		called <- struct{}{}
 		return struct{}{}, nil
 	})
@@ -578,7 +578,7 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 	})
 	s.RegisterHandler("add", add, requirePositive)
 
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
 	require.NoError(t, err)
@@ -624,11 +624,11 @@ func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
 			return next(ctx, raw)
 		}
 	}
-	Register(s, "add", func(_ context.Context, p addParams) (addResult, error) {
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
 		return addResult{Sum: p.A + p.B}, nil
 	}, requirePositive)
 
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
 	require.NoError(t, err)
@@ -647,12 +647,12 @@ func TestMiddlewareOrdering(t *testing.T) {
 	var log []string
 	s := NewServer()
 	s.Use(tagMiddleware("server1", &log), tagMiddleware("server2", &log))
-	Register(s, "add", func(_ context.Context, p addParams) (addResult, error) {
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
 		log = append(log, "handler")
 		return addResult{Sum: p.A + p.B}, nil
 	}, tagMiddleware("method1", &log), tagMiddleware("method2", &log))
 
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 1, B: 1}), NewID(1)))
 	require.NoError(t, err)
 	require.Nil(t, resp.Error)
@@ -662,7 +662,7 @@ func TestMiddlewareOrdering(t *testing.T) {
 
 func TestUseAfterRegisterPanics(t *testing.T) {
 	s := NewServer()
-	Register(s, "add", func(_ context.Context, p addParams) (addResult, error) {
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
 		return addResult{Sum: p.A + p.B}, nil
 	})
 	require.Panics(t, func() {
@@ -672,7 +672,7 @@ func TestUseAfterRegisterPanics(t *testing.T) {
 
 func TestParamsAsRawMessagePassThrough(t *testing.T) {
 	s := newTestServer(t)
-	c := NewClient(InProcess(s))
+	c := NewClient(s.Sender())
 
 	req := NewRequest("add", json.RawMessage(`{"a":7,"b":8}`), NewID(1))
 	resp, err := c.Send(context.Background(), req)

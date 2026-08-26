@@ -25,10 +25,10 @@ func (f SenderFunc) Send(ctx context.Context, req *Request) (*Response, error) {
 	return f(ctx, req)
 }
 
-// InProcess adapts a Server into a Sender, suitable for passing to NewClient
-// when client and server live in the same process. Serve cannot fail, so the
-// returned Sender's error is always nil.
-func InProcess(s *Server) Sender {
+// Sender returns a Sender that dispatches directly to s, suitable for
+// passing to NewClient when client and server live in the same process.
+// Serve cannot fail, so the returned Sender's error is always nil.
+func (s *Server) Sender() Sender {
 	return SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
 		return s.Serve(ctx, req), nil
 	})

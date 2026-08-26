@@ -11,7 +11,7 @@ import (
 // ExampleServer registers a typed method and dispatches a request.
 func ExampleServer() {
 	s := jsonrpc.NewServer()
-	jsonrpc.Register(s, "add", func(_ context.Context, p struct {
+	s.Register("add", func(_ context.Context, p struct {
 		A int `json:"a"`
 		B int `json:"b"`
 	}) (int, error) {
@@ -34,11 +34,11 @@ func ExampleServer() {
 // the id is generated, and the result is decoded into the target.
 func ExampleClient_Call() {
 	s := jsonrpc.NewServer()
-	jsonrpc.Register(s, "greet", func(_ context.Context, name string) (string, error) {
+	s.Register("greet", func(_ context.Context, name string) (string, error) {
 		return "hello " + name, nil
 	})
 
-	c := jsonrpc.NewClient(jsonrpc.InProcess(s))
+	c := jsonrpc.NewClient(s.Sender())
 
 	var greeting string
 	if err := c.Call(context.Background(), "greet", "world", &greeting); err != nil {
@@ -53,11 +53,11 @@ func ExampleClient_Call() {
 // through an in-process Server.
 func ExampleClient_Send() {
 	s := jsonrpc.NewServer()
-	jsonrpc.Register(s, "greet", func(_ context.Context, name string) (string, error) {
+	s.Register("greet", func(_ context.Context, name string) (string, error) {
 		return "hello " + name, nil
 	})
 
-	c := jsonrpc.NewClient(jsonrpc.InProcess(s))
+	c := jsonrpc.NewClient(s.Sender())
 
 	params, _ := jsonrpc.NewParams("world")
 	resp, err := c.Send(context.Background(), jsonrpc.NewRequest("greet", params, jsonrpc.NewID(1)))
@@ -91,7 +91,7 @@ func ExampleMiddleware() {
 
 	s := jsonrpc.NewServer()
 	s.Use(logging) // applied to every method
-	jsonrpc.Register(s, "add", func(_ context.Context, p struct {
+	s.Register("add", func(_ context.Context, p struct {
 		A int `json:"a"`
 		B int `json:"b"`
 	}) (int, error) {
@@ -110,7 +110,7 @@ func ExampleMiddleware() {
 // transport adapters that work in raw messages.
 func ExampleServer_ServeMessage() {
 	s := jsonrpc.NewServer()
-	jsonrpc.Register(s, "echo", func(_ context.Context, msg string) (string, error) {
+	s.Register("echo", func(_ context.Context, msg string) (string, error) {
 		return msg, nil
 	})
 

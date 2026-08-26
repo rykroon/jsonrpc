@@ -17,7 +17,7 @@ import (
 func newServer(t *testing.T) *jsonrpc.Server {
 	t.Helper()
 	s := jsonrpc.NewServer()
-	jsonrpc.Register(s, "addOne", func(_ context.Context, n int) (int, error) {
+	s.Register("addOne", func(_ context.Context, n int) (int, error) {
 		return n + 1, nil
 	})
 	return s
