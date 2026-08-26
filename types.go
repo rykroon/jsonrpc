@@ -13,8 +13,8 @@ const Version = "2.0"
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	ID      json.RawMessage `json:"id,omitempty"`
+	Params  json.RawMessage `json:"params,omitzero"`
+	ID      json.RawMessage `json:"id,omitzero"`
 }
 
 func (r *Request) IsNotification() bool {
@@ -26,7 +26,7 @@ func (r *Request) IsNotification() bool {
 // could not determine the request ID (e.g. parse error).
 type Response struct {
 	JSONRPC string          `json:"jsonrpc"`
-	Result  json.RawMessage `json:"result,omitempty"`
+	Result  json.RawMessage `json:"result,omitzero"`
 	Error   *Error          `json:"error,omitempty"`
 	ID      json.RawMessage `json:"id"`
 }

@@ -23,9 +23,13 @@
 // Server.ServeMessage is the byte-level entry point for transports that
 // work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing,
 // the spec's in-band parse error reporting, and batch messages (JSON
-// arrays), which are dispatched per element. HTTP adapters that prefer
-// to surface parse failures as HTTP 400 should skip ServeMessage and call
-// Serve directly.
+// arrays), which are dispatched per element. Decoding is strict: duplicate
+// object member names and unknown members on the request envelope are
+// rejected as Invalid Request (unknown members inside params are
+// tolerated). Protocol errors carry the spec's canonical message, with the
+// specific cause in Error.Data as {"details": ...}. HTTP adapters that
+// prefer to surface parse failures as HTTP 400 should skip ServeMessage
+// and call Serve directly.
 //
 // Client wraps a Sender — a function that round-trips a Request to a
 // Response across some transport. Server.Sender adapts a Server into a

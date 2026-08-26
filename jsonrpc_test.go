@@ -484,7 +484,12 @@ func TestServerRejectsInvalidIDs(t *testing.T) {
 			require.NotNil(t, resp)
 			require.NotNil(t, resp.Error)
 			require.Equal(t, CodeInvalidRequest, resp.Error.Code)
-			require.Contains(t, resp.Error.Message, "id")
+			require.Equal(t, "Invalid Request", resp.Error.Message)
+			var detail struct {
+				Details string `json:"details"`
+			}
+			require.NoError(t, resp.Error.UnmarshalData(&detail))
+			require.Contains(t, detail.Details, "id")
 			require.JSONEq(t, "null", string(resp.ID))
 		})
 	}
@@ -667,6 +672,107 @@ func TestUseAfterRegisterPanics(t *testing.T) {
 	})
 	require.Panics(t, func() {
 		s.Use(func(next Handler) Handler { return next })
+	})
+}
+
+func TestProtocolErrorsUseCanonicalMessages(t *testing.T) {
+	s := newTestServer(t)
+
+	out, err := s.ServeMessage(context.Background(), []byte(`{not valid json`))
+	require.NoError(t, err)
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.Equal(t, CodeParseError, resp.Error.Code)
+	require.Equal(t, "Parse error", resp.Error.Message)
+
+	var detail struct {
+		Details string `json:"details"`
+	}
+	require.NoError(t, resp.Error.UnmarshalData(&detail))
+	require.NotEmpty(t, detail.Details)
+
+	r := s.Serve(context.Background(), NewRequest("missing", nil, NewID(1)))
+	require.Equal(t, CodeMethodNotFound, r.Error.Code)
+	require.Equal(t, "Method not found", r.Error.Message)
+	require.NoError(t, r.Error.UnmarshalData(&detail))
+	require.Contains(t, detail.Details, "missing")
+}
+
+func TestDuplicateMemberNamesRejected(t *testing.T) {
+	s := newTestServer(t)
+
+	t.Run("duplicate on envelope", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"2.0","method":"add","method":"boom","id":1}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.NotNil(t, resp.Error)
+		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+	})
+
+	t.Run("duplicate inside params", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"a":2,"b":3},"id":1}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.NotNil(t, resp.Error)
+		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+	})
+
+	t.Run("duplicate params via Serve go through DecodeParams", func(t *testing.T) {
+		// A transport calling Serve directly may not have tokenized params;
+		// the typed pipeline still rejects duplicates, as Invalid params.
+		resp := s.Serve(context.Background(), &Request{
+			JSONRPC: Version,
+			Method:  "add",
+			Params:  json.RawMessage(`{"a":1,"a":2}`),
+			ID:      NewID(1),
+		})
+		require.NotNil(t, resp.Error)
+		require.Equal(t, CodeInvalidParams, resp.Error.Code)
+	})
+
+	t.Run("duplicate in one batch element fails only that element", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(), []byte(`[
+			{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1},
+			{"jsonrpc":"2.0","method":"add","method":"boom","id":2}
+		]`))
+		require.NoError(t, err)
+		var resps []Response
+		require.NoError(t, json.Unmarshal(out, &resps))
+		require.Len(t, resps, 2)
+		require.Nil(t, resps[0].Error)
+		require.JSONEq(t, `{"sum":3}`, string(resps[0].Result))
+		require.NotNil(t, resps[1].Error)
+		require.Equal(t, CodeInvalidRequest, resps[1].Error.Code)
+		// The offending element's id cannot be trusted, so the entry has id null.
+		require.JSONEq(t, "null", string(resps[1].ID))
+	})
+}
+
+func TestEnvelopeStrictness(t *testing.T) {
+	s := newTestServer(t)
+
+	t.Run("unknown envelope member rejected", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1,"extra":true}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.NotNil(t, resp.Error)
+		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+	})
+
+	t.Run("unknown member inside params tolerated", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2,"ignored":9},"id":1}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.Nil(t, resp.Error)
+		require.JSONEq(t, `{"sum":3}`, string(resp.Result))
 	})
 }
 

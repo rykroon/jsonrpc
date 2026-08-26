@@ -3,29 +3,35 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 )
 
 // DecodeParams unmarshals raw into a fresh P. An empty raw returns the zero
 // value of P with no error (the spec allows omitting params). Unmarshal
-// failure is reported as CodeInvalidParams.
+// failure is reported as CodeInvalidParams, with the cause in Error.Data.
+//
+// Decoding follows encoding/json/v2 semantics: duplicate member names and
+// invalid UTF-8 are rejected, and member names match struct fields
+// case-sensitively. Unknown members are tolerated — handlers that want
+// strict params should validate in Middleware.
 func DecodeParams[P any](raw json.RawMessage) (P, *Error) {
 	var p P
 	if len(raw) == 0 {
 		return p, nil
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return p, NewError(CodeInvalidParams, err.Error())
+	if err := jsonv2.Unmarshal(raw, &p); err != nil {
+		return p, protocolError(CodeInvalidParams, err.Error())
 	}
 	return p, nil
 }
 
 // MarshalResult marshals v into JSON bytes. Marshal failure is reported as
-// CodeInternalError.
+// CodeInternalError, with the cause in Error.Data.
 func MarshalResult(v any) (json.RawMessage, *Error) {
 	out, err := json.Marshal(v)
 	if err != nil {
-		return nil, NewError(CodeInternalError, err.Error())
+		return nil, protocolError(CodeInternalError, err.Error())
 	}
 	return out, nil
 }

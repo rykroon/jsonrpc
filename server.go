@@ -1,9 +1,10 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"sync"
@@ -91,13 +92,13 @@ func (s *Server) Register[P, R any](name string, fn GenericHandler[P, R], mw ...
 func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	// Validate the ID first so later error responses never echo an invalid ID.
 	if !req.IsNotification() && !isValidID(req.ID) {
-		return errorResponse(nil, NewError(CodeInvalidRequest, "id must be a string, number, or null"))
+		return errorResponse(nil, protocolError(CodeInvalidRequest, "id must be a string, number, or null"))
 	}
 	if req.JSONRPC != Version {
-		return errorResponse(req.ID, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`))
+		return errorResponse(req.ID, protocolError(CodeInvalidRequest, `jsonrpc must be "2.0"`))
 	}
 	if req.Method == "" {
-		return errorResponse(req.ID, NewError(CodeInvalidRequest, "missing method"))
+		return errorResponse(req.ID, protocolError(CodeInvalidRequest, "missing method"))
 	}
 
 	s.mu.RLock()
@@ -109,7 +110,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		if req.IsNotification() {
 			return nil
 		}
-		return errorResponse(req.ID, NewError(CodeMethodNotFound, "method not found: "+req.Method))
+		return errorResponse(req.ID, protocolError(CodeMethodNotFound, "method not found: "+req.Method))
 	}
 
 	result, rpcErr := h(ctx, req.Params)
@@ -144,17 +145,18 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 // in-band as a marshaled error Response, not as the error return. The
 // error return is reserved for response marshaling failures, which should
 // not occur in normal operation.
+//
+// Decoding is strict: messages with duplicate object member names anywhere,
+// or with unrecognized members on the request envelope itself, are rejected
+// as Invalid Request. Params content is not inspected here — unknown members
+// inside params are the handler's concern.
 func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
-	if isJSONArray(data) {
+	if data.Kind() == '[' {
 		return s.serveBatch(ctx, data)
 	}
 	var req Request
-	if err := json.Unmarshal(data, &req); err != nil {
-		var syntaxErr *json.SyntaxError
-		if errors.As(err, &syntaxErr) {
-			return marshalMessageError(NewError(CodeParseError, err.Error()))
-		}
-		return marshalMessageError(NewError(CodeInvalidRequest, err.Error()))
+	if err := decodeRequest(data, &req); err != nil {
+		return marshalMessageError(classifyDecodeError(err))
 	}
 	resp := s.Serve(ctx, &req)
 	if resp == nil {
@@ -165,20 +167,23 @@ func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.R
 
 // serveBatch dispatches a batch message sequentially, in order. Each element
 // is unmarshaled independently so one invalid element yields one error entry
-// without failing the rest of the batch.
+// without failing the rest of the batch. The outer array split tolerates
+// duplicate member names so that a duplicate inside one element surfaces as
+// that element's error, not a whole-batch failure; each element is then
+// decoded strictly.
 func (s *Server) serveBatch(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
 	var elems []json.RawMessage
-	if err := json.Unmarshal(data, &elems); err != nil {
-		return marshalMessageError(NewError(CodeParseError, err.Error()))
+	if err := jsonv2.Unmarshal(data, &elems, jsontext.AllowDuplicateNames(true)); err != nil {
+		return marshalMessageError(protocolError(CodeParseError, err.Error()))
 	}
 	if len(elems) == 0 {
-		return marshalMessageError(NewError(CodeInvalidRequest, "empty batch"))
+		return marshalMessageError(protocolError(CodeInvalidRequest, "empty batch"))
 	}
 	responses := make([]*Response, 0, len(elems))
 	for _, elem := range elems {
 		var req Request
-		if err := json.Unmarshal(elem, &req); err != nil {
-			responses = append(responses, errorResponse(nil, NewError(CodeInvalidRequest, err.Error())))
+		if err := decodeRequest(elem, &req); err != nil {
+			responses = append(responses, errorResponse(nil, classifyDecodeError(err)))
 			continue
 		}
 		if resp := s.Serve(ctx, &req); resp != nil {
@@ -191,6 +196,27 @@ func (s *Server) serveBatch(ctx context.Context, data json.RawMessage) (json.Raw
 	return json.Marshal(responses)
 }
 
+// decodeRequest unmarshals one request object with the inbound strictness
+// ServeMessage promises: duplicate member names are rejected (including
+// inside params — detection is tokenizer-level), and unknown envelope
+// members are rejected. Params content lands in a RawMessage, so its
+// members are otherwise not validated here.
+func decodeRequest(data json.RawMessage, req *Request) error {
+	return jsonv2.Unmarshal(data, req, jsonv2.RejectUnknownMembers(true))
+}
+
+// classifyDecodeError maps a decode failure to the spec's error codes:
+// malformed JSON is a Parse error, while everything else — wrong shape,
+// duplicate member names (well-formed JSON that violates uniqueness),
+// unknown envelope members — is an Invalid Request.
+func classifyDecodeError(err error) *Error {
+	var syntaxErr *jsontext.SyntacticError
+	if errors.As(err, &syntaxErr) && !errors.Is(err, jsontext.ErrDuplicateName) {
+		return protocolError(CodeParseError, err.Error())
+	}
+	return protocolError(CodeInvalidRequest, err.Error())
+}
+
 func errorResponse(id json.RawMessage, e *Error) *Response {
 	if len(id) == 0 {
 		id = json.RawMessage("null")
@@ -201,24 +227,10 @@ func errorResponse(id json.RawMessage, e *Error) *Response {
 // isValidID reports whether id is a JSON string, number, or null. JSON
 // bools, objects, and arrays are rejected. The spec discourages null and
 // non-integer numbers but does not forbid them, so we allow both.
-//
-// Assumes id is well-formed JSON (which it is when sourced from json.Unmarshal).
-// We're recognizing the token shape by its first byte, not parsing the value.
 func isValidID(id json.RawMessage) bool {
-	id = bytes.TrimSpace(id)
-	if len(id) == 0 {
-		return false
-	}
-	c := id[0]
-	return c == '"' || c == '-' || c == 'n' || (c >= '0' && c <= '9')
-}
-
-func isJSONArray(data []byte) bool {
-	for _, b := range data {
-		if b == ' ' || b == '\t' || b == '\r' || b == '\n' {
-			continue
-		}
-		return b == '['
+	switch id.Kind() {
+	case '"', '0', 'n': // string, any number, null
+		return true
 	}
 	return false
 }
