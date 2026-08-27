@@ -3,6 +3,7 @@ package jsonrpc_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/rykroon/jsonrpc"
@@ -110,12 +111,52 @@ func ExampleMiddleware() {
 // transport adapters that work in raw messages.
 func ExampleServer_ServeMessage() {
 	s := jsonrpc.NewServer()
-	s.Register("echo", func(_ context.Context, msg string) (string, error) {
-		return msg, nil
+	// params arrives as an object or an array — the spec allows no other
+	// shape — so a typed handler takes a struct or a slice, not a bare string.
+	s.Register("echo", func(_ context.Context, p struct {
+		Msg string `json:"msg"`
+	}) (string, error) {
+		return p.Msg, nil
 	})
 
-	in := []byte(`{"jsonrpc":"2.0","method":"echo","params":"ping","id":1}`)
+	in := []byte(`{"jsonrpc":"2.0","method":"echo","params":{"msg":"ping"},"id":1}`)
 	out, _ := s.ServeMessage(context.Background(), in)
 	fmt.Println(string(out))
 	// Output: {"jsonrpc":"2.0","result":"ping","id":1}
+}
+
+// ExampleServer_SetRequestDecoder replaces the request decoder to control the
+// errors reported for a bad envelope. This one delegates to the package
+// default and then enriches its error, keeping the code and message the
+// default chose while adding the offending message to Data.
+func ExampleServer_SetRequestDecoder() {
+	type errorData struct {
+		Details string `json:"details"`
+		Got     string `json:"got"`
+	}
+
+	s := jsonrpc.NewServer()
+	s.SetRequestDecoder(func(data json.RawMessage, req *jsonrpc.Request) error {
+		err := jsonrpc.DecodeRequest(data, req)
+		e, ok := errors.AsType[*jsonrpc.Error](err)
+		if !ok {
+			// Not a classified error: let the server classify it.
+			return err
+		}
+		var d errorData
+		_ = e.UnmarshalData(&d)
+		d.Got = string(data)
+		// Returning an *Error hands the client exactly this object.
+		return jsonrpc.NewError(e.Code, e.Message).MustSetData(d)
+	})
+	s.Register("add", func(_ context.Context, p struct {
+		A, B int
+	}) (int, error) {
+		return p.A + p.B, nil
+	})
+
+	out, _ := s.ServeMessage(context.Background(),
+		[]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`))
+	fmt.Println(string(out))
+	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Request","data":{"details":"unknown member: surprise","got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
 }

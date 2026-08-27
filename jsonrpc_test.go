@@ -3,7 +3,9 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -787,4 +789,278 @@ func TestParamsAsRawMessagePassThrough(t *testing.T) {
 	var got addResult
 	require.NoError(t, resp.Decode(&got))
 	require.Equal(t, 15, got.Sum)
+}
+
+// decodeDetails runs one message through ServeMessage and returns the single
+// error response's code and its Data "details" string.
+func decodeDetails(t *testing.T, s *Server, msg string) (int, string, json.RawMessage) {
+	t.Helper()
+	out, err := s.ServeMessage(context.Background(), []byte(msg))
+	require.NoError(t, err)
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.NotNil(t, resp.Error, "expected an error response for %s", msg)
+	var detail struct {
+		Details string `json:"details"`
+	}
+	require.NoError(t, resp.Error.UnmarshalData(&detail))
+	return resp.Error.Code, detail.Details, resp.ID
+}
+
+func TestDefaultDecoderRejections(t *testing.T) {
+	s := newTestServer(t)
+
+	cases := []struct {
+		name    string
+		msg     string
+		code    int
+		details string
+	}{
+		{"number at top level", `5`, CodeInvalidRequest, "request must be a JSON object"},
+		{"string at top level", `"hi"`, CodeInvalidRequest, "request must be a JSON object"},
+		{"bool at top level", `true`, CodeInvalidRequest, "request must be a JSON object"},
+		{"null at top level", `null`, CodeInvalidRequest, "request must be a JSON object"},
+		{"non-string jsonrpc", `{"jsonrpc":2,"method":"add","id":1}`, CodeInvalidRequest, "jsonrpc must be a string"},
+		{"non-string method", `{"jsonrpc":"2.0","method":5,"id":1}`, CodeInvalidRequest, "method must be a string"},
+		{"unknown member", `{"jsonrpc":"2.0","method":"add","extra":true,"id":1}`, CodeInvalidRequest, "unknown member: extra"},
+		{"scalar params", `{"jsonrpc":"2.0","method":"add","params":5,"id":1}`, CodeInvalidRequest, "params must be an object or array"},
+		{"string params", `{"jsonrpc":"2.0","method":"add","params":"ping","id":1}`, CodeInvalidRequest, "params must be an object or array"},
+		{"bool params", `{"jsonrpc":"2.0","method":"add","params":true,"id":1}`, CodeInvalidRequest, "params must be an object or array"},
+		{"empty message", ``, CodeParseError, ""},
+		{"truncated message", `{"jsonrpc":`, CodeParseError, ""},
+		{"trailing value", `{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1} {"jsonrpc":"2.0"}`, CodeParseError, ""},
+		{"trailing garbage", `{"jsonrpc":"2.0","method":"add","id":1} !`, CodeParseError, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, details, _ := decodeDetails(t, s, tc.msg)
+			require.Equal(t, tc.code, code)
+			if tc.details != "" {
+				require.Equal(t, tc.details, details)
+			} else {
+				require.NotEmpty(t, details)
+			}
+		})
+	}
+}
+
+func TestDefaultDecoderAcceptsBothParamsShapes(t *testing.T) {
+	s := NewServer()
+	s.Register("byName", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
+	})
+	s.Register("byPosition", func(_ context.Context, p []int) (addResult, error) {
+		return addResult{Sum: p[0] + p[1]}, nil
+	})
+
+	for _, msg := range []string{
+		`{"jsonrpc":"2.0","method":"byName","params":{"a":1,"b":2},"id":1}`,
+		`{"jsonrpc":"2.0","method":"byPosition","params":[1,2],"id":1}`,
+	} {
+		out, err := s.ServeMessage(context.Background(), []byte(msg))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.Nil(t, resp.Error)
+		require.JSONEq(t, `{"sum":3}`, string(resp.Result))
+	}
+}
+
+func TestDefaultDecoderTreatsNullParamsAsAbsent(t *testing.T) {
+	s := NewServer()
+	var seen json.RawMessage
+	sawParams := false
+	s.RegisterHandler("probe", func(_ context.Context, params json.RawMessage) (json.RawMessage, *Error) {
+		seen, sawParams = params, true
+		return json.RawMessage(`"ok"`), nil
+	})
+
+	out, err := s.ServeMessage(context.Background(),
+		[]byte(`{"jsonrpc":"2.0","method":"probe","params":null,"id":1}`))
+	require.NoError(t, err)
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.Nil(t, resp.Error)
+
+	// An explicit null must reach the handler as absent params, not as the
+	// four bytes "null" — that is what makes DecodeParams yield the zero P.
+	require.True(t, sawParams)
+	require.Nil(t, seen)
+}
+
+func TestDecodeErrorEchoesRecoveredID(t *testing.T) {
+	s := newTestServer(t)
+
+	t.Run("id read before the failure is echoed", func(t *testing.T) {
+		// The id precedes the offending member, so the decoder has it in hand.
+		_, _, id := decodeDetails(t, s, `{"jsonrpc":"2.0","id":7,"method":"add","params":5}`)
+		require.JSONEq(t, "7", string(id))
+	})
+
+	t.Run("id after the failure is not recoverable", func(t *testing.T) {
+		_, _, id := decodeDetails(t, s, `{"jsonrpc":"2.0","method":"add","params":5,"id":7}`)
+		require.JSONEq(t, "null", string(id))
+	})
+
+	t.Run("unusable id is not echoed", func(t *testing.T) {
+		_, _, id := decodeDetails(t, s, `{"jsonrpc":"2.0","id":{"bad":1},"method":"add","params":5}`)
+		require.JSONEq(t, "null", string(id))
+	})
+
+	t.Run("wrong version still echoes the id", func(t *testing.T) {
+		// The version verdict belongs to Serve precisely so the id survives.
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"1.0","method":"add","id":9}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+		require.JSONEq(t, "9", string(resp.ID))
+	})
+}
+
+func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
+	custom := NewError(-32050, "bad envelope").MustSetData(map[string]string{"hint": "read the docs"})
+
+	t.Run("bespoke *Error surfaces verbatim", func(t *testing.T) {
+		s := NewServer()
+		s.SetRequestDecoder(func(json.RawMessage, *Request) error { return custom })
+		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+			return addResult{Sum: p.A + p.B}, nil
+		})
+
+		out, err := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"add","id":1}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		// protocolError must not have rewritten any of it.
+		require.Equal(t, -32050, resp.Error.Code)
+		require.Equal(t, "bad envelope", resp.Error.Message)
+		var hint struct {
+			Hint string `json:"hint"`
+		}
+		require.NoError(t, resp.Error.UnmarshalData(&hint))
+		require.Equal(t, "read the docs", hint.Hint)
+	})
+
+	t.Run("wrapped *Error is unwrapped", func(t *testing.T) {
+		s := NewServer()
+		s.SetRequestDecoder(func(json.RawMessage, *Request) error {
+			return fmt.Errorf("decoding envelope: %w", custom)
+		})
+
+		out, err := s.ServeMessage(context.Background(), []byte(`{}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.Equal(t, -32050, resp.Error.Code)
+		require.Equal(t, "bad envelope", resp.Error.Message)
+	})
+
+	t.Run("plain error is classified as Invalid Request", func(t *testing.T) {
+		s := NewServer()
+		s.SetRequestDecoder(func(json.RawMessage, *Request) error { return errors.New("nope") })
+
+		code, details, _ := decodeDetails(t, s, `{}`)
+		require.Equal(t, CodeInvalidRequest, code)
+		require.Equal(t, "nope", details)
+	})
+
+	t.Run("typed-nil *Error does not read as success", func(t *testing.T) {
+		s := NewServer()
+		s.SetRequestDecoder(func(json.RawMessage, *Request) error {
+			var e *Error
+			return fmt.Errorf("wrapped: %w", e)
+		})
+
+		code, _, _ := decodeDetails(t, s, `{}`)
+		require.Equal(t, CodeInvalidRequest, code)
+	})
+}
+
+func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
+	// A decoder that delegates to DecodeRequest but relaxes one of its rules:
+	// unknown envelope members are dropped instead of rejected.
+	lenient := func(data json.RawMessage, req *Request) error {
+		if err := DecodeRequest(data, req); err != nil {
+			var stripped map[string]json.RawMessage
+			if jsonv2.Unmarshal(data, &stripped) != nil {
+				return err
+			}
+			for k := range stripped {
+				switch k {
+				case "jsonrpc", "method", "params", "id":
+				default:
+					delete(stripped, k)
+				}
+			}
+			clean, mErr := json.Marshal(stripped)
+			if mErr != nil {
+				return err
+			}
+			return DecodeRequest(clean, req)
+		}
+		return nil
+	}
+
+	s := NewServer()
+	s.SetRequestDecoder(lenient)
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
+	})
+
+	t.Run("single message", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1,"extra":true}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.Nil(t, resp.Error)
+		require.JSONEq(t, `{"sum":3}`, string(resp.Result))
+	})
+
+	t.Run("applies to every batch element", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(), []byte(`[
+			{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1,"extra":true},
+			{"jsonrpc":"2.0","method":"add","params":{"a":3,"b":4},"id":2,"other":1}
+		]`))
+		require.NoError(t, err)
+		var resps []Response
+		require.NoError(t, json.Unmarshal(out, &resps))
+		require.Len(t, resps, 2)
+		require.Nil(t, resps[0].Error)
+		require.Nil(t, resps[1].Error)
+		require.JSONEq(t, `{"sum":3}`, string(resps[0].Result))
+		require.JSONEq(t, `{"sum":7}`, string(resps[1].Result))
+	})
+
+	t.Run("Serve still owns the version verdict", func(t *testing.T) {
+		// Even a decoder that accepts anything cannot smuggle a bad version
+		// past Serve, which validates every Request however it was built.
+		s := NewServer()
+		s.SetRequestDecoder(func(_ json.RawMessage, req *Request) error {
+			req.JSONRPC, req.Method, req.ID = "1.0", "add", json.RawMessage("1")
+			return nil
+		})
+		out, err := s.ServeMessage(context.Background(), []byte(`{}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+		require.JSONEq(t, "1", string(resp.ID))
+	})
+}
+
+func TestSetRequestDecoderPanics(t *testing.T) {
+	t.Run("nil decoder", func(t *testing.T) {
+		s := NewServer()
+		require.Panics(t, func() { s.SetRequestDecoder(nil) })
+	})
+
+	t.Run("after a method is registered", func(t *testing.T) {
+		s := newTestServer(t)
+		require.Panics(t, func() {
+			s.SetRequestDecoder(func(json.RawMessage, *Request) error { return nil })
+		})
+	})
 }

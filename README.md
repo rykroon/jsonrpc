@@ -73,6 +73,8 @@ middleware.
 - `Middleware` / `Server.Use` — compose auth, logging, and validation
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params
+- `Server.SetRequestDecoder` — swap the request decoder to control the
+  errors reported for a malformed envelope
   marshaling, id generation, and result decoding; server errors come back
   as `*Error`. `Client.Send` is the low-level escape hatch, round-tripping
   a `*Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).

@@ -23,13 +23,32 @@
 // Server.ServeMessage is the byte-level entry point for transports that
 // work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing,
 // the spec's in-band parse error reporting, and batch messages (JSON
-// arrays), which are dispatched per element. Decoding is strict: duplicate
-// object member names and unknown members on the request envelope are
-// rejected as Invalid Request (unknown members inside params are
-// tolerated). Protocol errors carry the spec's canonical message, with the
-// specific cause in Error.Data as {"details": ...}. HTTP adapters that
-// prefer to surface parse failures as HTTP 400 should skip ServeMessage
-// and call Serve directly.
+// arrays), which are dispatched per element. Protocol errors carry the
+// spec's canonical message, with the specific cause in Error.Data as
+// {"details": ...}. HTTP adapters that prefer to surface parse failures as
+// HTTP 400 should skip ServeMessage and call Serve directly.
+//
+// # Decoding
+//
+// Turning bytes into a Request is a seam: a RequestDecoder. The package
+// default, DecodeRequest, walks the message token by token so that every
+// rejection carries a message this package wrote rather than one from the
+// JSON library. It is strict — duplicate object member names anywhere and
+// unknown members on the request envelope are rejected as Invalid Request
+// (unknown members inside params are tolerated), and per the spec params
+// must be an object or an array, so a typed handler's P is a struct or a
+// slice, never a bare scalar. An explicit "params":null means the same
+// thing as omitting params.
+//
+// Server.SetRequestDecoder installs a different one, which is how a caller
+// takes control of the errors reported for a malformed or non-conforming
+// envelope: returning an *Error from a decoder surfaces it verbatim, while
+// any other error is classified as a Parse error or an Invalid Request. A
+// custom decoder can delegate to DecodeRequest and adjust the result.
+//
+// Whatever the decoder does, Serve independently validates every Request it
+// dispatches — the id shape, the "2.0" version, and a non-empty method —
+// because transports may build a Request without decoding one at all.
 //
 // Client wraps a Sender — a function that round-trips a Request to a
 // Response across some transport. Server.Sender adapts a Server into a
