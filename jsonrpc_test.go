@@ -826,6 +826,7 @@ func TestDefaultDecoderRejections(t *testing.T) {
 		{"scalar params", `{"jsonrpc":"2.0","method":"add","params":5,"id":1}`, CodeInvalidRequest, "params must be an object or array"},
 		{"string params", `{"jsonrpc":"2.0","method":"add","params":"ping","id":1}`, CodeInvalidRequest, "params must be an object or array"},
 		{"bool params", `{"jsonrpc":"2.0","method":"add","params":true,"id":1}`, CodeInvalidRequest, "params must be an object or array"},
+		{"null params", `{"jsonrpc":"2.0","method":"add","params":null,"id":1}`, CodeInvalidRequest, "params must be an object or array"},
 		{"empty message", ``, CodeParseError, ""},
 		{"truncated message", `{"jsonrpc":`, CodeParseError, ""},
 		{"trailing value", `{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1} {"jsonrpc":"2.0"}`, CodeParseError, ""},
@@ -866,25 +867,24 @@ func TestDefaultDecoderAcceptsBothParamsShapes(t *testing.T) {
 	}
 }
 
-func TestDefaultDecoderTreatsNullParamsAsAbsent(t *testing.T) {
+func TestDefaultDecoderOmittedParams(t *testing.T) {
 	s := NewServer()
 	var seen json.RawMessage
-	sawParams := false
+	called := false
 	s.RegisterHandler("probe", func(_ context.Context, params json.RawMessage) (json.RawMessage, *Error) {
-		seen, sawParams = params, true
+		seen, called = params, true
 		return json.RawMessage(`"ok"`), nil
 	})
 
+	// Omitting the member is the only way to send no parameters; "params":null
+	// is a present member holding a non-structured value, which §4.2 forbids.
 	out, err := s.ServeMessage(context.Background(),
-		[]byte(`{"jsonrpc":"2.0","method":"probe","params":null,"id":1}`))
+		[]byte(`{"jsonrpc":"2.0","method":"probe","id":1}`))
 	require.NoError(t, err)
 	var resp Response
 	require.NoError(t, json.Unmarshal(out, &resp))
 	require.Nil(t, resp.Error)
-
-	// An explicit null must reach the handler as absent params, not as the
-	// four bytes "null" — that is what makes DecodeParams yield the zero P.
-	require.True(t, sawParams)
+	require.True(t, called)
 	require.Nil(t, seen)
 }
 

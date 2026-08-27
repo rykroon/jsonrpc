@@ -254,10 +254,12 @@ func (s *Server) decode(data json.RawMessage, req *Request) error {
 // is otherwise not validated; it lands in a RawMessage for the handler to
 // decode, so unknown members inside it are tolerated.
 //
-// Per the spec params must be an object or array; an explicit null is treated
-// the same as omitting params. Required members are deliberately not checked
-// here — Serve rejects a missing method or a wrong version on every path,
-// including transports that build a Request themselves.
+// Per the spec params must be a structured value — an object or an array —
+// whenever the member is present, so null is rejected along with every other
+// scalar; a request with no parameters omits the member entirely. Required
+// members are deliberately not checked here — Serve rejects a missing method
+// or a wrong version on every path, including transports that build a Request
+// themselves.
 func DecodeRequest(data json.RawMessage, req *Request) error {
 	d := jsontext.NewDecoder(bytes.NewReader(data))
 
@@ -309,9 +311,9 @@ func DecodeRequest(data json.RawMessage, req *Request) error {
 			case jsontext.KindBeginObject, jsontext.KindBeginArray:
 				// ReadValue's buffer is only valid until the next read.
 				req.Params = json.RawMessage(val.Clone())
-			case jsontext.KindNull:
-				// An explicit null says the same thing as omitting params.
 			default:
+				// Including null: the member is present, and null is not a
+				// structured value. Omit params entirely to send none.
 				return protocolError(CodeInvalidRequest, "params must be an object or array")
 			}
 

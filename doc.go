@@ -36,9 +36,10 @@
 // JSON library. It is strict — duplicate object member names anywhere and
 // unknown members on the request envelope are rejected as Invalid Request
 // (unknown members inside params are tolerated), and per the spec params
-// must be an object or an array, so a typed handler's P is a struct or a
-// slice, never a bare scalar. An explicit "params":null means the same
-// thing as omitting params.
+// must be a structured value whenever the member is present, so a typed
+// handler's P is a struct or a slice, never a bare scalar. "params":null is
+// rejected like any other scalar — a request with no parameters omits the
+// member, which is what NewParams(nil) and Client.Call with nil params do.
 //
 // Server.SetRequestDecoder installs a different one, which is how a caller
 // takes control of the errors reported for a malformed or non-conforming
