@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 )
 
@@ -24,9 +25,9 @@ const (
 // Error is the JSON-RPC error object. Data is optional; when present it holds
 // raw JSON so the caller can decode it into whatever shape they expect.
 type Error struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data,omitzero"`
+	Code    int            `json:"code"`
+	Message string         `json:"message"`
+	Data    jsontext.Value `json:"data,omitzero"`
 }
 
 func (e *Error) Error() string {

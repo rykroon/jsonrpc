@@ -3,6 +3,7 @@ package jsonrpc_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 
@@ -22,8 +23,8 @@ func ExampleServer() {
 	req := &jsonrpc.Request{
 		JSONRPC: jsonrpc.Version,
 		Method:  "add",
-		Params:  json.RawMessage(`{"a":2,"b":3}`),
-		ID:      json.RawMessage("1"),
+		Params:  jsontext.Value(`{"a":2,"b":3}`),
+		ID:      jsontext.Value("1"),
 	}
 	resp := s.Serve(context.Background(), req)
 	out, _ := json.Marshal(resp)
@@ -84,7 +85,7 @@ func ExampleMiddleware() {
 	// parameter or result types. The returned func literal converts to
 	// Handler automatically — no cast needed.
 	logging := func(next jsonrpc.Handler) jsonrpc.Handler {
-		return func(ctx context.Context, params json.RawMessage) (json.RawMessage, *jsonrpc.Error) {
+		return func(ctx context.Context, params jsontext.Value) (jsontext.Value, *jsonrpc.Error) {
 			fmt.Printf("calling with params: %s\n", params)
 			return next(ctx, params)
 		}
@@ -136,7 +137,7 @@ func ExampleServer_SetRequestDecoder() {
 	}
 
 	s := jsonrpc.NewServer()
-	s.SetRequestDecoder(func(data json.RawMessage, req *jsonrpc.Request) error {
+	s.SetRequestDecoder(func(data jsontext.Value, req *jsonrpc.Request) error {
 		err := jsonrpc.DecodeRequest(data, req)
 		e, ok := errors.AsType[*jsonrpc.Error](err)
 		if !ok {

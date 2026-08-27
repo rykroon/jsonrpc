@@ -2,8 +2,8 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 )
 
@@ -15,12 +15,12 @@ import (
 // invalid UTF-8 are rejected, and member names match struct fields
 // case-sensitively. Unknown members are tolerated — handlers that want
 // strict params should validate in Middleware.
-func DecodeParams[P any](raw json.RawMessage) (P, *Error) {
+func DecodeParams[P any](raw jsontext.Value) (P, *Error) {
 	var p P
 	if len(raw) == 0 {
 		return p, nil
 	}
-	if err := jsonv2.Unmarshal(raw, &p); err != nil {
+	if err := json.Unmarshal(raw, &p); err != nil {
 		return p, protocolError(CodeInvalidParams, err.Error())
 	}
 	return p, nil
@@ -28,7 +28,7 @@ func DecodeParams[P any](raw json.RawMessage) (P, *Error) {
 
 // MarshalResult marshals v into JSON bytes. Marshal failure is reported as
 // CodeInternalError, with the cause in Error.Data.
-func MarshalResult(v any) (json.RawMessage, *Error) {
+func MarshalResult(v any) (jsontext.Value, *Error) {
 	out, err := json.Marshal(v)
 	if err != nil {
 		return nil, protocolError(CodeInternalError, err.Error())
@@ -45,7 +45,7 @@ func MarshalResult(v any) (json.RawMessage, *Error) {
 // (auth, JSON schema validation, etc.), wrap Typed(fn) in Middleware rather
 // than hand-wiring the pipeline.
 func Typed[P, R any](fn TypedHandler[P, R]) Handler {
-	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+	return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
 		p, rpcErr := DecodeParams[P](raw)
 		if rpcErr != nil {
 			return nil, rpcErr

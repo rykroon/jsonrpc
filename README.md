@@ -49,7 +49,7 @@ handlers without touching the typed pipeline:
 ```go
 // logging knows nothing about any handler's param or result types.
 func logging(next jsonrpc.Handler) jsonrpc.Handler {
-    return func(ctx context.Context, params json.RawMessage) (json.RawMessage, *jsonrpc.Error) {
+    return func(ctx context.Context, params jsontext.Value) (jsontext.Value, *jsonrpc.Error) {
         log.Printf("rpc params: %s", params)
         return next(ctx, params)
     }
@@ -79,7 +79,7 @@ middleware.
   as `*Error`. `Client.Send` is the low-level escape hatch, round-tripping
   a `*Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
-  requests without touching `json.RawMessage` directly.
+  requests without touching `jsontext.Value` directly.
 - `Response.Decode` — unmarshal a successful result into a target.
 - `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream). Handles batch

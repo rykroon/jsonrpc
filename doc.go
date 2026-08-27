@@ -68,7 +68,7 @@
 // # Polymorphic fields
 //
 // Request.Params, Request.ID, Response.Result, and Error.Data are stored
-// as json.RawMessage because the spec leaves their types open. Decode
+// as jsontext.Value because the spec leaves their types open. Decode
 // them into concrete types at the point of use; the typed helpers
 // (Server.Register, Typed, DecodeParams) do this for you.
 //

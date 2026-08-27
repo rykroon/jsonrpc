@@ -2,8 +2,8 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"testing"
@@ -35,7 +35,7 @@ func newTestServer(t *testing.T) *Server {
 	return s
 }
 
-func mustParams(t *testing.T, v any) json.RawMessage {
+func mustParams(t *testing.T, v any) jsontext.Value {
 	t.Helper()
 	p, err := NewParams(v)
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestNotificationUnknownMethodProducesNoResponse(t *testing.T) {
 
 func TestNilResultEncodesAsNull(t *testing.T) {
 	s := NewServer()
-	s.RegisterHandler("void", func(_ context.Context, _ json.RawMessage) (json.RawMessage, *Error) {
+	s.RegisterHandler("void", func(_ context.Context, _ jsontext.Value) (jsontext.Value, *Error) {
 		return nil, nil
 	})
 
@@ -158,7 +158,7 @@ func TestInvalidIDNotEchoedOnVersionError(t *testing.T) {
 	resp := s.Serve(context.Background(), &Request{
 		JSONRPC: "1.0",
 		Method:  "add",
-		ID:      json.RawMessage(`{"x":1}`),
+		ID:      jsontext.Value(`{"x":1}`),
 	})
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
@@ -273,7 +273,7 @@ func TestRequestNotificationHasNoIDField(t *testing.T) {
 }
 
 func TestResponseAlwaysHasID(t *testing.T) {
-	resp := &Response{JSONRPC: Version, ID: json.RawMessage("null"), Error: NewError(CodeParseError, "bad")}
+	resp := &Response{JSONRPC: Version, ID: jsontext.Value("null"), Error: NewError(CodeParseError, "bad")}
 	b, err := json.Marshal(resp)
 	require.NoError(t, err)
 	require.Contains(t, string(b), `"id":null`)
@@ -480,8 +480,8 @@ func TestServerRejectsInvalidIDs(t *testing.T) {
 			resp := s.Serve(context.Background(), &Request{
 				JSONRPC: Version,
 				Method:  "add",
-				Params:  json.RawMessage(`{"a":1,"b":2}`),
-				ID:      json.RawMessage(tc.id),
+				Params:  jsontext.Value(`{"a":1,"b":2}`),
+				ID:      jsontext.Value(tc.id),
 			})
 			require.NotNil(t, resp)
 			require.NotNil(t, resp.Error)
@@ -519,8 +519,8 @@ func TestServerAcceptsValidIDs(t *testing.T) {
 			resp := s.Serve(context.Background(), &Request{
 				JSONRPC: Version,
 				Method:  "add",
-				Params:  json.RawMessage(`{"a":1,"b":2}`),
-				ID:      json.RawMessage(tc.id),
+				Params:  jsontext.Value(`{"a":1,"b":2}`),
+				ID:      jsontext.Value(tc.id),
 			})
 			require.NotNil(t, resp)
 			require.Nil(t, resp.Error)
@@ -531,7 +531,7 @@ func TestServerAcceptsValidIDs(t *testing.T) {
 
 func TestSendPropagatesCallerID(t *testing.T) {
 	s := newTestServer(t)
-	var seen json.RawMessage
+	var seen jsontext.Value
 	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
 		seen = append(seen[:0], req.ID...)
 		return s.Serve(ctx, req), nil
@@ -553,7 +553,7 @@ func TestNewIDIntegerForms(t *testing.T) {
 }
 
 func TestNewParamsPassthrough(t *testing.T) {
-	raw := json.RawMessage(`{"a":1}`)
+	raw := jsontext.Value(`{"a":1}`)
 	out, err := NewParams(raw)
 	require.NoError(t, err)
 	require.Equal(t, string(raw), string(out))
@@ -568,7 +568,7 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 	// Pre-decode validation middleware owns the full *Error including
 	// structured Data, then delegates to the typed handler.
 	requirePositive := func(next Handler) Handler {
-		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, NewError(CodeInvalidParams, err.Error())
@@ -609,7 +609,7 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 // letting tests assert ordering of the wrapping.
 func tagMiddleware(name string, log *[]string) Middleware {
 	return func(next Handler) Handler {
-		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
 			*log = append(*log, name)
 			return next(ctx, raw)
 		}
@@ -620,7 +620,7 @@ func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
 	s := NewServer()
 	// A raw middleware that rejects without ever decoding into the typed P.
 	requirePositive := func(next Handler) Handler {
-		return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
+		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, NewError(CodeInvalidParams, err.Error())
@@ -729,7 +729,7 @@ func TestDuplicateMemberNamesRejected(t *testing.T) {
 		resp := s.Serve(context.Background(), &Request{
 			JSONRPC: Version,
 			Method:  "add",
-			Params:  json.RawMessage(`{"a":1,"a":2}`),
+			Params:  jsontext.Value(`{"a":1,"a":2}`),
 			ID:      NewID(1),
 		})
 		require.NotNil(t, resp.Error)
@@ -782,7 +782,7 @@ func TestParamsAsRawMessagePassThrough(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(s.Sender())
 
-	req := NewRequest("add", json.RawMessage(`{"a":7,"b":8}`), NewID(1))
+	req := NewRequest("add", jsontext.Value(`{"a":7,"b":8}`), NewID(1))
 	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
 	require.Nil(t, resp.Error)
@@ -793,7 +793,7 @@ func TestParamsAsRawMessagePassThrough(t *testing.T) {
 
 // decodeDetails runs one message through ServeMessage and returns the single
 // error response's code and its Data "details" string.
-func decodeDetails(t *testing.T, s *Server, msg string) (int, string, json.RawMessage) {
+func decodeDetails(t *testing.T, s *Server, msg string) (int, string, jsontext.Value) {
 	t.Helper()
 	out, err := s.ServeMessage(context.Background(), []byte(msg))
 	require.NoError(t, err)
@@ -869,11 +869,11 @@ func TestDefaultDecoderAcceptsBothParamsShapes(t *testing.T) {
 
 func TestDefaultDecoderOmittedParams(t *testing.T) {
 	s := NewServer()
-	var seen json.RawMessage
+	var seen jsontext.Value
 	called := false
-	s.RegisterHandler("probe", func(_ context.Context, params json.RawMessage) (json.RawMessage, *Error) {
+	s.RegisterHandler("probe", func(_ context.Context, params jsontext.Value) (jsontext.Value, *Error) {
 		seen, called = params, true
-		return json.RawMessage(`"ok"`), nil
+		return jsontext.Value(`"ok"`), nil
 	})
 
 	// Omitting the member is the only way to send no parameters; "params":null
@@ -924,7 +924,7 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 	t.Run("bespoke *Error surfaces verbatim", func(t *testing.T) {
 		s := NewServer()
-		s.SetRequestDecoder(func(json.RawMessage, *Request) error { return custom })
+		s.SetRequestDecoder(func(jsontext.Value, *Request) error { return custom })
 		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
 			return addResult{Sum: p.A + p.B}, nil
 		})
@@ -945,7 +945,7 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 	t.Run("wrapped *Error is unwrapped", func(t *testing.T) {
 		s := NewServer()
-		s.SetRequestDecoder(func(json.RawMessage, *Request) error {
+		s.SetRequestDecoder(func(jsontext.Value, *Request) error {
 			return fmt.Errorf("decoding envelope: %w", custom)
 		})
 
@@ -959,7 +959,7 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 	t.Run("plain error is classified as Invalid Request", func(t *testing.T) {
 		s := NewServer()
-		s.SetRequestDecoder(func(json.RawMessage, *Request) error { return errors.New("nope") })
+		s.SetRequestDecoder(func(jsontext.Value, *Request) error { return errors.New("nope") })
 
 		code, details, _ := decodeDetails(t, s, `{}`)
 		require.Equal(t, CodeInvalidRequest, code)
@@ -968,7 +968,7 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 	t.Run("typed-nil *Error does not read as success", func(t *testing.T) {
 		s := NewServer()
-		s.SetRequestDecoder(func(json.RawMessage, *Request) error {
+		s.SetRequestDecoder(func(jsontext.Value, *Request) error {
 			var e *Error
 			return fmt.Errorf("wrapped: %w", e)
 		})
@@ -981,10 +981,10 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 	// A decoder that delegates to DecodeRequest but relaxes one of its rules:
 	// unknown envelope members are dropped instead of rejected.
-	lenient := func(data json.RawMessage, req *Request) error {
+	lenient := func(data jsontext.Value, req *Request) error {
 		if err := DecodeRequest(data, req); err != nil {
-			var stripped map[string]json.RawMessage
-			if jsonv2.Unmarshal(data, &stripped) != nil {
+			var stripped map[string]jsontext.Value
+			if json.Unmarshal(data, &stripped) != nil {
 				return err
 			}
 			for k := range stripped {
@@ -1038,8 +1038,8 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 		// Even a decoder that accepts anything cannot smuggle a bad version
 		// past Serve, which validates every Request however it was built.
 		s := NewServer()
-		s.SetRequestDecoder(func(_ json.RawMessage, req *Request) error {
-			req.JSONRPC, req.Method, req.ID = "1.0", "add", json.RawMessage("1")
+		s.SetRequestDecoder(func(_ jsontext.Value, req *Request) error {
+			req.JSONRPC, req.Method, req.ID = "1.0", "add", jsontext.Value("1")
 			return nil
 		})
 		out, err := s.ServeMessage(context.Background(), []byte(`{}`))
@@ -1060,7 +1060,7 @@ func TestSetRequestDecoderPanics(t *testing.T) {
 	t.Run("after a method is registered", func(t *testing.T) {
 		s := newTestServer(t)
 		require.Panics(t, func() {
-			s.SetRequestDecoder(func(json.RawMessage, *Request) error { return nil })
+			s.SetRequestDecoder(func(jsontext.Value, *Request) error { return nil })
 		})
 	})
 }

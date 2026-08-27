@@ -47,7 +47,7 @@ func NewClient(sender Sender) *Client {
 }
 
 // Call invokes method with params, decoding the result into result. Params
-// are marshaled with NewParams (nil means no params; a json.RawMessage passes
+// are marshaled with NewParams (nil means no params; a jsontext.Value passes
 // through). The request id is generated from an internal counter. A nil
 // result skips decoding.
 //

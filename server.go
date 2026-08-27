@@ -3,9 +3,8 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/json/jsontext"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +19,7 @@ import (
 // state (a DB pool, a compiled JSON schema, a service object), register a
 // method value — e.g. s.RegisterHandler(name, svc.Handle) — which captures
 // the receiver and satisfies Handler without any cast.
-type Handler func(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error)
+type Handler func(ctx context.Context, params jsontext.Value) (jsontext.Value, *Error)
 
 type TypedHandler[P, R any] func(context.Context, P) (R, error)
 
@@ -42,7 +41,7 @@ type Middleware func(next Handler) Handler
 //
 // DecodeRequest is the package default. Install another with
 // Server.SetRequestDecoder.
-type RequestDecoder func(data json.RawMessage, req *Request) error
+type RequestDecoder func(data jsontext.Value, req *Request) error
 
 // chain wraps h with mw, applying mw[0] outermost.
 func chain(h Handler, mw []Middleware) Handler {
@@ -158,7 +157,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	// A success response must carry a result member; omitempty would drop a
 	// nil one, so encode it as JSON null.
 	if len(result) == 0 {
-		result = json.RawMessage("null")
+		result = jsontext.Value("null")
 	}
 	return &Response{JSONRPC: Version, Result: result, ID: req.ID}
 }
@@ -187,7 +186,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 // members on the request envelope itself, are rejected as Invalid Request.
 // Params content is not inspected here — unknown members inside params are
 // the handler's concern.
-func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
+func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
 	if data.Kind() == '[' {
 		return s.serveBatch(ctx, data)
 	}
@@ -208,9 +207,9 @@ func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.R
 // duplicate member names so that a duplicate inside one element surfaces as
 // that element's error, not a whole-batch failure; each element then goes
 // through the server's RequestDecoder.
-func (s *Server) serveBatch(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
-	var elems []json.RawMessage
-	if err := jsonv2.Unmarshal(data, &elems, jsontext.AllowDuplicateNames(true)); err != nil {
+func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
+	var elems []jsontext.Value
+	if err := json.Unmarshal(data, &elems, jsontext.AllowDuplicateNames(true)); err != nil {
 		return marshalMessageError(protocolError(CodeParseError, err.Error()))
 	}
 	if len(elems) == 0 {
@@ -234,7 +233,7 @@ func (s *Server) serveBatch(ctx context.Context, data json.RawMessage) (json.Raw
 }
 
 // decode runs the server's configured RequestDecoder.
-func (s *Server) decode(data json.RawMessage, req *Request) error {
+func (s *Server) decode(data jsontext.Value, req *Request) error {
 	s.mu.RLock()
 	d := s.decoder
 	s.mu.RUnlock()
@@ -260,7 +259,7 @@ func (s *Server) decode(data json.RawMessage, req *Request) error {
 // members are deliberately not checked here — Serve rejects a missing method
 // or a wrong version on every path, including transports that build a Request
 // themselves.
-func DecodeRequest(data json.RawMessage, req *Request) error {
+func DecodeRequest(data jsontext.Value, req *Request) error {
 	d := jsontext.NewDecoder(bytes.NewReader(data))
 
 	tok, err := d.ReadToken()
@@ -310,7 +309,7 @@ func DecodeRequest(data json.RawMessage, req *Request) error {
 			switch val.Kind() {
 			case jsontext.KindBeginObject, jsontext.KindBeginArray:
 				// ReadValue's buffer is only valid until the next read.
-				req.Params = json.RawMessage(val.Clone())
+				req.Params = jsontext.Value(val.Clone())
 			default:
 				// Including null: the member is present, and null is not a
 				// structured value. Omit params entirely to send none.
@@ -322,7 +321,7 @@ func DecodeRequest(data json.RawMessage, req *Request) error {
 			if err != nil {
 				return tokenError(err)
 			}
-			req.ID = json.RawMessage(val.Clone())
+			req.ID = jsontext.Value(val.Clone())
 
 		default:
 			return protocolError(CodeInvalidRequest, "unknown member: "+name)
@@ -373,9 +372,9 @@ func classifyDecodeError(err error) *Error {
 	return protocolError(CodeInvalidRequest, err.Error())
 }
 
-func errorResponse(id json.RawMessage, e *Error) *Response {
+func errorResponse(id jsontext.Value, e *Error) *Response {
 	if len(id) == 0 {
-		id = json.RawMessage("null")
+		id = jsontext.Value("null")
 	}
 	return &Response{JSONRPC: Version, Error: e, ID: id}
 }
@@ -384,7 +383,7 @@ func errorResponse(id json.RawMessage, e *Error) *Response {
 // there is none to trust. The spec requires a null id only when the id could
 // not be detected, so echoing one we did detect lets the client correlate the
 // error with the call that caused it.
-func recoveredID(req *Request) json.RawMessage {
+func recoveredID(req *Request) jsontext.Value {
 	if isValidID(req.ID) {
 		return req.ID
 	}
@@ -394,7 +393,7 @@ func recoveredID(req *Request) json.RawMessage {
 // isValidID reports whether id is a JSON string, number, or null. JSON
 // bools, objects, and arrays are rejected. The spec discourages null and
 // non-integer numbers but does not forbid them, so we allow both.
-func isValidID(id json.RawMessage) bool {
+func isValidID(id jsontext.Value) bool {
 	switch id.Kind() {
 	case '"', '0', 'n': // string, any number, null
 		return true
@@ -402,10 +401,10 @@ func isValidID(id json.RawMessage) bool {
 	return false
 }
 
-func marshalMessageError(e *Error) (json.RawMessage, error) {
+func marshalMessageError(e *Error) (jsontext.Value, error) {
 	return json.Marshal(&Response{
 		JSONRPC: Version,
 		Error:   e,
-		ID:      json.RawMessage("null"),
+		ID:      jsontext.Value("null"),
 	})
 }

@@ -1,6 +1,9 @@
 package jsonrpc
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"encoding/json/jsontext"
+)
 
 const Version = "2.0"
 
@@ -11,10 +14,10 @@ const Version = "2.0"
 // Params may be an object or array; ID may be a string, number, or null.
 // Decode them into concrete types at the point of use.
 type Request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitzero"`
-	ID      json.RawMessage `json:"id,omitzero"`
+	JSONRPC string         `json:"jsonrpc"`
+	Method  string         `json:"method"`
+	Params  jsontext.Value `json:"params,omitzero"`
+	ID      jsontext.Value `json:"id,omitzero"`
 }
 
 func (r *Request) IsNotification() bool {
@@ -25,10 +28,10 @@ func (r *Request) IsNotification() bool {
 // on a valid response. ID is always present; it is JSON null when the server
 // could not determine the request ID (e.g. parse error).
 type Response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	Result  json.RawMessage `json:"result,omitzero"`
-	Error   *Error          `json:"error,omitempty"`
-	ID      json.RawMessage `json:"id"`
+	JSONRPC string         `json:"jsonrpc"`
+	Result  jsontext.Value `json:"result,omitzero"`
+	Error   *Error         `json:"error,omitempty"`
+	ID      jsontext.Value `json:"id"`
 }
 
 // Decode unmarshals r.Result into into. It is a no-op when into is nil or
@@ -44,31 +47,31 @@ func (r *Response) Decode(into any) error {
 // build a notification (no id, no response expected), use NewNotification.
 // Params and id are raw JSON; use NewParams and NewID to build them from
 // Go values.
-func NewRequest(method string, params, id json.RawMessage) *Request {
+func NewRequest(method string, params, id jsontext.Value) *Request {
 	return &Request{JSONRPC: Version, Method: method, Params: params, ID: id}
 }
 
 // NewNotification assembles a Request without an id. The server dispatches
 // the method but produces no response.
-func NewNotification(method string, params json.RawMessage) *Request {
+func NewNotification(method string, params jsontext.Value) *Request {
 	return &Request{JSONRPC: Version, Method: method, Params: params}
 }
 
 // NewID returns the JSON encoding of v for use as Request.ID. The type
 // constraint matches the spec-allowed id shapes (string or integer). For
 // other types, marshal directly with json.Marshal.
-func NewID[T ~string | ~int | ~int64 | ~uint64](v T) json.RawMessage {
+func NewID[T ~string | ~int | ~int64 | ~uint64](v T) jsontext.Value {
 	b, _ := json.Marshal(v)
 	return b
 }
 
 // NewParams marshals v into JSON for use as Request.Params. A nil v returns
-// nil. A json.RawMessage is returned unchanged.
-func NewParams(v any) (json.RawMessage, error) {
+// nil. A jsontext.Value is returned unchanged.
+func NewParams(v any) (jsontext.Value, error) {
 	if v == nil {
 		return nil, nil
 	}
-	if raw, ok := v.(json.RawMessage); ok {
+	if raw, ok := v.(jsontext.Value); ok {
 		return raw, nil
 	}
 	return json.Marshal(v)
