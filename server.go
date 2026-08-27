@@ -1,12 +1,14 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 )
 
@@ -28,6 +30,20 @@ type TypedHandler[P, R any] func(context.Context, P) (R, error)
 // the typed pipeline. The first middleware in a chain is the outermost layer.
 type Middleware func(next Handler) Handler
 
+// RequestDecoder decodes one JSON-RPC request message into req. It is the
+// seam ServeMessage uses to turn bytes into a Request; batch splitting happens
+// above it, so a decoder always sees exactly one request object.
+//
+// Returning an *Error surfaces that error to the client verbatim, which is how
+// a decoder takes full control of the codes, messages, and Data it reports.
+// Returning any other error lets the server classify it — malformed JSON as a
+// Parse error, everything else as an Invalid Request — so a decoder that only
+// forwards an Unmarshal failure still behaves correctly.
+//
+// DecodeRequest is the package default. Install another with
+// Server.SetRequestDecoder.
+type RequestDecoder func(data json.RawMessage, req *Request) error
+
 // chain wraps h with mw, applying mw[0] outermost.
 func chain(h Handler, mw []Middleware) Handler {
 	for i := len(mw) - 1; i >= 0; i-- {
@@ -41,10 +57,11 @@ type Server struct {
 	mu         sync.RWMutex
 	methods    map[string]Handler
 	middleware []Middleware
+	decoder    RequestDecoder
 }
 
 func NewServer() *Server {
-	return &Server{methods: map[string]Handler{}}
+	return &Server{methods: map[string]Handler{}, decoder: DecodeRequest}
 }
 
 // Use appends server-wide middleware applied to every handler, wrapping
@@ -61,6 +78,24 @@ func (s *Server) Use(mw ...Middleware) {
 		panic("jsonrpc: Use must be called before registering methods")
 	}
 	s.middleware = append(s.middleware, mw...)
+}
+
+// SetRequestDecoder replaces the decoder ServeMessage uses to parse inbound
+// messages, letting a caller control the errors reported for a malformed or
+// non-conforming request envelope. The default is DecodeRequest.
+//
+// Like Use, it is setup-time configuration and must be called before any
+// method is registered; it panics otherwise, and panics on a nil decoder.
+func (s *Server) SetRequestDecoder(d RequestDecoder) {
+	if d == nil {
+		panic("jsonrpc: SetRequestDecoder requires a non-nil decoder")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.methods) > 0 {
+		panic("jsonrpc: SetRequestDecoder must be called before registering methods")
+	}
+	s.decoder = d
 }
 
 // RegisterHandler installs h under name, wrapped with the given per-method
@@ -146,17 +181,19 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 // error return is reserved for response marshaling failures, which should
 // not occur in normal operation.
 //
-// Decoding is strict: messages with duplicate object member names anywhere,
-// or with unrecognized members on the request envelope itself, are rejected
-// as Invalid Request. Params content is not inspected here — unknown members
-// inside params are the handler's concern.
+// Each message is decoded by the server's RequestDecoder — DecodeRequest
+// unless SetRequestDecoder installed another. The default is strict:
+// messages with duplicate object member names anywhere, or with unrecognized
+// members on the request envelope itself, are rejected as Invalid Request.
+// Params content is not inspected here — unknown members inside params are
+// the handler's concern.
 func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
 	if data.Kind() == '[' {
 		return s.serveBatch(ctx, data)
 	}
 	var req Request
-	if err := decodeRequest(data, &req); err != nil {
-		return marshalMessageError(classifyDecodeError(err))
+	if err := s.decode(data, &req); err != nil {
+		return json.Marshal(errorResponse(recoveredID(&req), classifyDecodeError(err)))
 	}
 	resp := s.Serve(ctx, &req)
 	if resp == nil {
@@ -166,11 +203,11 @@ func (s *Server) ServeMessage(ctx context.Context, data json.RawMessage) (json.R
 }
 
 // serveBatch dispatches a batch message sequentially, in order. Each element
-// is unmarshaled independently so one invalid element yields one error entry
+// is decoded independently so one invalid element yields one error entry
 // without failing the rest of the batch. The outer array split tolerates
 // duplicate member names so that a duplicate inside one element surfaces as
-// that element's error, not a whole-batch failure; each element is then
-// decoded strictly.
+// that element's error, not a whole-batch failure; each element then goes
+// through the server's RequestDecoder.
 func (s *Server) serveBatch(ctx context.Context, data json.RawMessage) (json.RawMessage, error) {
 	var elems []json.RawMessage
 	if err := jsonv2.Unmarshal(data, &elems, jsontext.AllowDuplicateNames(true)); err != nil {
@@ -182,8 +219,8 @@ func (s *Server) serveBatch(ctx context.Context, data json.RawMessage) (json.Raw
 	responses := make([]*Response, 0, len(elems))
 	for _, elem := range elems {
 		var req Request
-		if err := decodeRequest(elem, &req); err != nil {
-			responses = append(responses, errorResponse(nil, classifyDecodeError(err)))
+		if err := s.decode(elem, &req); err != nil {
+			responses = append(responses, errorResponse(recoveredID(&req), classifyDecodeError(err)))
 			continue
 		}
 		if resp := s.Serve(ctx, &req); resp != nil {
@@ -196,20 +233,139 @@ func (s *Server) serveBatch(ctx context.Context, data json.RawMessage) (json.Raw
 	return json.Marshal(responses)
 }
 
-// decodeRequest unmarshals one request object with the inbound strictness
-// ServeMessage promises: duplicate member names are rejected (including
-// inside params — detection is tokenizer-level), and unknown envelope
-// members are rejected. Params content lands in a RawMessage, so its
-// members are otherwise not validated here.
-func decodeRequest(data json.RawMessage, req *Request) error {
-	return jsonv2.Unmarshal(data, req, jsonv2.RejectUnknownMembers(true))
+// decode runs the server's configured RequestDecoder.
+func (s *Server) decode(data json.RawMessage, req *Request) error {
+	s.mu.RLock()
+	d := s.decoder
+	s.mu.RUnlock()
+	return d(data, req)
 }
 
-// classifyDecodeError maps a decode failure to the spec's error codes:
-// malformed JSON is a Parse error, while everything else — wrong shape,
+// DecodeRequest is the package's default RequestDecoder. It walks one request
+// object token by token so that every rejection carries a message this package
+// wrote rather than one from the JSON library: an unrecognized envelope member,
+// a wrong "jsonrpc" version, a non-string method, or params that are not a
+// structured value are all reported as Invalid Request, while malformed input
+// is a Parse error.
+//
+// Decoding is strict in the ways ServeMessage promises. Duplicate member names
+// are rejected anywhere in the message, including inside params — detection is
+// tokenizer-level. Unrecognized envelope members are rejected. Params content
+// is otherwise not validated; it lands in a RawMessage for the handler to
+// decode, so unknown members inside it are tolerated.
+//
+// Per the spec params must be a structured value — an object or an array —
+// whenever the member is present, so null is rejected along with every other
+// scalar; a request with no parameters omits the member entirely. Required
+// members are deliberately not checked here — Serve rejects a missing method
+// or a wrong version on every path, including transports that build a Request
+// themselves.
+func DecodeRequest(data json.RawMessage, req *Request) error {
+	d := jsontext.NewDecoder(bytes.NewReader(data))
+
+	tok, err := d.ReadToken()
+	if err != nil {
+		return tokenError(err)
+	}
+	if tok.Kind() != jsontext.KindBeginObject {
+		return protocolError(CodeInvalidRequest, "request must be a JSON object")
+	}
+
+	for d.PeekKind() != jsontext.KindEndObject {
+		tok, err := d.ReadToken()
+		if err != nil {
+			return tokenError(err)
+		}
+		// Token.String allocates a Go string, so the name stays valid across
+		// the reads below; the Token itself does not.
+		switch name := tok.String(); name {
+		case "jsonrpc":
+			tok, err := d.ReadToken()
+			if err != nil {
+				return tokenError(err)
+			}
+			if tok.Kind() != jsontext.KindString {
+				return protocolError(CodeInvalidRequest, "jsonrpc must be a string")
+			}
+			// Whether the version is "2.0" is Serve's verdict, not the
+			// decoder's: failing here would discard an id we can read, and
+			// Serve reaches the same conclusion with the id in hand.
+			req.JSONRPC = tok.String()
+
+		case "method":
+			tok, err := d.ReadToken()
+			if err != nil {
+				return tokenError(err)
+			}
+			if tok.Kind() != jsontext.KindString {
+				return protocolError(CodeInvalidRequest, "method must be a string")
+			}
+			req.Method = tok.String()
+
+		case "params":
+			val, err := d.ReadValue()
+			if err != nil {
+				return tokenError(err)
+			}
+			switch val.Kind() {
+			case jsontext.KindBeginObject, jsontext.KindBeginArray:
+				// ReadValue's buffer is only valid until the next read.
+				req.Params = json.RawMessage(val.Clone())
+			default:
+				// Including null: the member is present, and null is not a
+				// structured value. Omit params entirely to send none.
+				return protocolError(CodeInvalidRequest, "params must be an object or array")
+			}
+
+		case "id":
+			val, err := d.ReadValue()
+			if err != nil {
+				return tokenError(err)
+			}
+			req.ID = json.RawMessage(val.Clone())
+
+		default:
+			return protocolError(CodeInvalidRequest, "unknown member: "+name)
+		}
+	}
+
+	// Consume the closing brace, then require the message to end there: a
+	// Decoder reads a stream of top-level values, so a second one is trailing
+	// garbage rather than a second request.
+	if _, err := d.ReadToken(); err != nil {
+		return tokenError(err)
+	}
+	if _, err := d.ReadToken(); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return tokenError(err)
+		}
+		return protocolError(CodeParseError, "unexpected data after top-level value")
+	}
+	return nil
+}
+
+// tokenError maps a tokenizer failure to the spec's error codes: a duplicate
+// member name is well-formed JSON that violates uniqueness (Invalid Request),
+// while anything else — a syntax error, a truncated or empty message — is
+// malformed input (Parse error).
+func tokenError(err error) *Error {
+	if errors.Is(err, jsontext.ErrDuplicateName) {
+		return protocolError(CodeInvalidRequest, err.Error())
+	}
+	return protocolError(CodeParseError, err.Error())
+}
+
+// classifyDecodeError maps a decode failure to the spec's error codes. A
+// decoder that already classified its own failure wins outright; otherwise
+// malformed JSON is a Parse error, and everything else — wrong shape,
 // duplicate member names (well-formed JSON that violates uniqueness),
 // unknown envelope members — is an Invalid Request.
 func classifyDecodeError(err error) *Error {
+	// A typed-nil *Error inside a non-nil error must not be surfaced as the
+	// response error; fall through and classify it like any other failure.
+	if e, ok := errors.AsType[*Error](err); ok && e != nil {
+		return e
+	}
 	var syntaxErr *jsontext.SyntacticError
 	if errors.As(err, &syntaxErr) && !errors.Is(err, jsontext.ErrDuplicateName) {
 		return protocolError(CodeParseError, err.Error())
@@ -222,6 +378,17 @@ func errorResponse(id json.RawMessage, e *Error) *Response {
 		id = json.RawMessage("null")
 	}
 	return &Response{JSONRPC: Version, Error: e, ID: id}
+}
+
+// recoveredID returns the id a failed decode managed to read, or nil when
+// there is none to trust. The spec requires a null id only when the id could
+// not be detected, so echoing one we did detect lets the client correlate the
+// error with the call that caused it.
+func recoveredID(req *Request) json.RawMessage {
+	if isValidID(req.ID) {
+		return req.ID
+	}
+	return nil
 }
 
 // isValidID reports whether id is a JSON string, number, or null. JSON
