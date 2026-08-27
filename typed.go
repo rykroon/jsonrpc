@@ -44,7 +44,7 @@ func MarshalResult(v any) (json.RawMessage, *Error) {
 // Middleware, or reuse it under several names. To run logic before the decode
 // (auth, JSON schema validation, etc.), wrap Typed(fn) in Middleware rather
 // than hand-wiring the pipeline.
-func Typed[P, R any](fn func(context.Context, P) (R, error)) Handler {
+func Typed[P, R any](fn TypedHandler[P, R]) Handler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, *Error) {
 		p, rpcErr := DecodeParams[P](raw)
 		if rpcErr != nil {
