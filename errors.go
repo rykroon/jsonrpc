@@ -13,17 +13,15 @@ const (
 	CodeInvalidParams  = -32602
 	CodeInternalError  = -32603
 
-	// CodeServerError and CodeServerErrorMin bound the JSON-RPC 2.0
-	// server-defined error range (-32000 to -32099), reserved for
-	// application-defined errors. Choose codes within this range to avoid
-	// colliding with the reserved protocol codes above; CodeServerError is
-	// the conventional default.
+	// CodeServerError and CodeServerErrorMin bound the server-defined error
+	// range, reserved for application errors and free of the protocol codes
+	// above. CodeServerError is the conventional default.
 	CodeServerError    = -32000 // first (highest) server-defined code
 	CodeServerErrorMin = -32099 // last (lowest) server-defined code
 )
 
-// Error is the JSON-RPC error object. Data is optional; when present it holds
-// raw JSON so the caller can decode it into whatever shape they expect.
+// Error is the JSON-RPC error object. Data is optional and holds raw JSON for
+// the caller to decode.
 type Error struct {
 	Code    int            `json:"code"`
 	Message string         `json:"message"`
@@ -38,8 +36,8 @@ func NewError(code int, message string) *Error {
 	return &Error{Code: code, Message: message}
 }
 
-// SetData marshals data and assigns it to the Error's Data field. On marshal
-// failure it returns the error and leaves Data unchanged.
+// SetData marshals data into the Data field, leaving Data unchanged on
+// marshal failure.
 func (e *Error) SetData(data any) error {
 	b, err := json.Marshal(data)
 	if err != nil {
@@ -49,9 +47,8 @@ func (e *Error) SetData(data any) error {
 	return nil
 }
 
-// MustSetData is SetData for data known to be marshalable (static shapes,
-// registration-time values). It panics on marshal failure and returns the
-// receiver so it can be chained: NewError(code, msg).MustSetData(v).
+// MustSetData is SetData for data known to be marshalable. It panics on
+// failure and returns e so it can be chained.
 func (e *Error) MustSetData(data any) *Error {
 	if err := e.SetData(data); err != nil {
 		panic(fmt.Sprintf("jsonrpc: marshal error data: %v", err))
@@ -59,8 +56,7 @@ func (e *Error) MustSetData(data any) *Error {
 	return e
 }
 
-// UnmarshalData decodes the Error's Data field into into. If Data is empty
-// (no data attached) it is a no-op and returns nil.
+// UnmarshalData decodes the Data field into into. Empty Data is a no-op.
 func (e *Error) UnmarshalData(into any) error {
 	if len(e.Data) == 0 {
 		return nil
@@ -84,10 +80,9 @@ func canonicalMessage(code int) string {
 	}
 }
 
-// protocolError builds a library-generated protocol error: Message carries
-// the spec's canonical text so clients can match on it, and the specific
-// cause goes into Data as {"details": ...}. Application errors from handlers
-// are never rewritten this way.
+// protocolError builds a library-generated protocol error: the spec's
+// canonical message, with the cause in Data as {"details": ...}. Errors from
+// handlers are never rewritten this way.
 func protocolError(code int, details string) *Error {
 	e := NewError(code, canonicalMessage(code))
 	e.Data, _ = json.Marshal(struct {

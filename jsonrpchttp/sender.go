@@ -11,14 +11,12 @@ import (
 	"github.com/rykroon/jsonrpc"
 )
 
-// Sender is a jsonrpc.Sender that round-trips Requests over HTTP. Each
-// Send POSTs the marshaled Request to URL and decodes one Response from
-// the reply body. Notifications discard the response body and return
-// (nil, nil).
+// Sender is a jsonrpc.Sender that round-trips Requests over HTTP: each Send
+// POSTs the marshaled Request to URL and decodes one Response from the reply
+// body. Notifications return (nil, nil).
 //
-// Custom headers and authentication are not handled here; wrap Client to
-// add a Transport that injects them, or compose a jsonrpc.SenderFunc around
-// this Sender.
+// For custom headers or authentication, give Client a Transport that injects
+// them, or compose a jsonrpc.SenderFunc around this Sender.
 type Sender struct {
 	// URL is the JSON-RPC endpoint. Required.
 	URL string

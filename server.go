@@ -11,35 +11,30 @@ import (
 	"sync"
 )
 
-// Handler is the low-level dispatch contract. It receives the raw params
-// bytes (possibly empty) and returns either result bytes or an *Error.
-// A nil result with a nil error is valid and encodes as `"result":null`.
-//
-// Write a plain function for a stateless method. For a method that carries
-// state (a DB pool, a compiled JSON schema, a service object), register a
-// method value — e.g. s.RegisterHandler(name, svc.Handle) — which captures
-// the receiver and satisfies Handler without any cast.
+// Handler is the low-level dispatch contract: it takes the raw params bytes
+// (possibly empty) and returns result bytes or an *Error. A nil result with a
+// nil error is valid and encodes as `"result":null`. A method value —
+// s.RegisterHandler(name, svc.Handle) — satisfies it without a cast, so
+// stateful methods need no wrapper.
 type Handler func(ctx context.Context, params jsontext.Value) (jsontext.Value, *Error)
 
 type TypedHandler[P, R any] func(context.Context, P) (R, error)
 
-// Middleware wraps a Handler to add cross-cutting behavior (auth,
-// logging, validation, etc.). It operates on the raw params, so it composes
-// with both typed handlers (via Register) and raw handlers without touching
-// the typed pipeline. The first middleware in a chain is the outermost layer.
+// Middleware wraps a Handler to add cross-cutting behavior. It operates on
+// the raw params, so it composes with typed and raw handlers alike. The first
+// middleware in a chain is the outermost layer.
 type Middleware func(next Handler) Handler
 
-// RequestDecoder decodes one JSON-RPC request message into req. It is the
-// seam ServeMessage uses to turn bytes into a Request; batch splitting happens
-// above it, so a decoder always sees exactly one request object.
+// RequestDecoder is the seam ServeMessage uses to turn bytes into a Request.
+// Batch splitting happens above it, so a decoder always sees exactly one
+// request object.
 //
-// Returning an *Error surfaces that error to the client verbatim, which is how
-// a decoder takes full control of the codes, messages, and Data it reports.
-// Returning any other error lets the server classify it — malformed JSON as a
-// Parse error, everything else as an Invalid Request — so a decoder that only
-// forwards an Unmarshal failure still behaves correctly.
+// Returning an *Error surfaces it to the client verbatim, giving the decoder
+// full control of the code, message, and Data. Any other error is classified
+// by the server — malformed JSON as a Parse error, everything else as an
+// Invalid Request.
 //
-// DecodeRequest is the package default. Install another with
+// DecodeRequest is the package default; install another with
 // Server.SetRequestDecoder.
 type RequestDecoder func(data jsontext.Value, req *Request) error
 
@@ -63,13 +58,9 @@ func NewServer() *Server {
 	return &Server{methods: map[string]Handler{}, decoder: DecodeRequest}
 }
 
-// Use appends server-wide middleware applied to every handler, wrapping
-// around any per-method middleware. The first middleware passed is the
-// outermost layer.
-//
-// Use must be called before registering methods: middleware is baked into
-// each handler at registration time, so Use has no effect on methods already
-// registered. It panics if called after a method is registered.
+// Use appends server-wide middleware applied to every handler, outside any
+// per-method middleware, with mw[0] outermost. Middleware is baked into each
+// handler at registration time, so Use panics if any method is registered.
 func (s *Server) Use(mw ...Middleware) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -80,11 +71,9 @@ func (s *Server) Use(mw ...Middleware) {
 }
 
 // SetRequestDecoder replaces the decoder ServeMessage uses to parse inbound
-// messages, letting a caller control the errors reported for a malformed or
-// non-conforming request envelope. The default is DecodeRequest.
-//
-// Like Use, it is setup-time configuration and must be called before any
-// method is registered; it panics otherwise, and panics on a nil decoder.
+// messages, taking control of the errors reported for a malformed envelope.
+// The default is DecodeRequest. Like Use, it must be called before any method
+// is registered; it panics otherwise, or on a nil decoder.
 func (s *Server) SetRequestDecoder(d RequestDecoder) {
 	if d == nil {
 		panic("jsonrpc: SetRequestDecoder requires a non-nil decoder")
@@ -97,9 +86,9 @@ func (s *Server) SetRequestDecoder(d RequestDecoder) {
 	s.decoder = d
 }
 
-// RegisterHandler installs h under name, wrapped with the given per-method
+// RegisterHandler installs h under name, wrapped with the per-method
 // middleware (mw[0] outermost) and then the server-wide middleware. It panics
-// if name is already taken.
+// if name is taken.
 func (s *Server) RegisterHandler(name string, h Handler, mw ...Middleware) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,20 +98,15 @@ func (s *Server) RegisterHandler(name string, h Handler, mw ...Middleware) {
 	s.methods[name] = chain(chain(h, mw), s.middleware)
 }
 
-// Register adapts a typed function into a Handler with Typed and installs
-// it on the server, wrapped with the given per-method middleware (mw[0]
-// outermost) followed by the server-wide middleware.
-//
-// Equivalent to s.RegisterHandler(name, Typed(fn), mw...).
+// Register adapts fn with Typed and installs it under name. Equivalent to
+// s.RegisterHandler(name, Typed(fn), mw...).
 func (s *Server) Register[P, R any](name string, fn TypedHandler[P, R], mw ...Middleware) {
 	s.RegisterHandler(name, Typed(fn), mw...)
 }
 
-// Serve dispatches a single request. For notifications the returned
-// *Response is nil — the handler still runs, but no reply is produced.
-//
-// Serve does not recover from panics in registered handlers. If your
-// transport requires recovery, wrap Serve.
+// Serve dispatches a single request, returning nil for a notification — the
+// handler still runs, but no reply is produced. Panics in handlers are not
+// recovered; wrap Serve if your transport needs that.
 func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	// Validate the ID first so later error responses never echo an invalid ID.
 	if !req.IsNotification() && !isValidID(req.ID) {
@@ -163,29 +147,20 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 }
 
 // ServeMessage parses data as a JSON-RPC message, dispatches it via Serve,
-// and returns the marshaled response bytes. Notifications produce (nil, nil)
-// — there is no reply to send.
+// and returns the marshaled response bytes; notifications produce (nil, nil).
+// Use it from transports that work in raw JSON messages (WebSocket, stdio,
+// TCP); HTTP adapters that prefer parse failures as HTTP 400 should call
+// Serve directly.
 //
-// Use ServeMessage from transports that work in raw JSON messages
-// (WebSocket, stdio, TCP). HTTP adapters that prefer to surface parse
-// failures as HTTP 400 should call Serve directly instead.
+// Batch messages (JSON arrays) are dispatched element by element, in order,
+// and produce an array of responses in request order. A batch of only
+// notifications produces (nil, nil), and an empty batch is an invalid request.
 //
-// Batch messages (JSON arrays) are dispatched element by element, in
-// order, and produce a JSON array of the responses in request order. A
-// batch of only notifications produces (nil, nil), and an empty batch is
-// an invalid request.
+// JSON-RPC errors are returned in-band as a marshaled error Response; the
+// error return is reserved for response marshaling failures.
 //
-// JSON-RPC errors (parse errors, invalid request, etc.) are returned
-// in-band as a marshaled error Response, not as the error return. The
-// error return is reserved for response marshaling failures, which should
-// not occur in normal operation.
-//
-// Each message is decoded by the server's RequestDecoder — DecodeRequest
-// unless SetRequestDecoder installed another. The default is strict:
-// messages with duplicate object member names anywhere, or with unrecognized
-// members on the request envelope itself, are rejected as Invalid Request.
-// Params content is not inspected here — unknown members inside params are
-// the handler's concern.
+// Each message is decoded by the server's RequestDecoder, DecodeRequest by
+// default.
 func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
 	if data.Kind() == '[' {
 		return s.serveBatch(ctx, data)
@@ -201,12 +176,10 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	return json.Marshal(resp)
 }
 
-// serveBatch dispatches a batch message sequentially, in order. Each element
-// is decoded independently so one invalid element yields one error entry
-// without failing the rest of the batch. The outer array split tolerates
-// duplicate member names so that a duplicate inside one element surfaces as
-// that element's error, not a whole-batch failure; each element then goes
-// through the server's RequestDecoder.
+// serveBatch dispatches a batch sequentially, in order. Each element is
+// decoded independently so one invalid element yields one error entry rather
+// than failing the batch. The outer array split tolerates duplicate member
+// names so a duplicate inside an element surfaces as that element's error.
 func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
 	var elems []jsontext.Value
 	if err := json.Unmarshal(data, &elems, jsontext.AllowDuplicateNames(true)); err != nil {
@@ -241,24 +214,20 @@ func (s *Server) decode(data jsontext.Value, req *Request) error {
 }
 
 // DecodeRequest is the package's default RequestDecoder. It walks one request
-// object token by token so that every rejection carries a message this package
-// wrote rather than one from the JSON library: an unrecognized envelope member,
-// a wrong "jsonrpc" version, a non-string method, or params that are not a
-// structured value are all reported as Invalid Request, while malformed input
-// is a Parse error.
+// object token by token so every rejection carries a message this package
+// wrote rather than one from the JSON library: an unrecognized envelope
+// member, a non-string method, or non-structured params are Invalid Request,
+// while malformed input is a Parse error.
 //
-// Decoding is strict in the ways ServeMessage promises. Duplicate member names
-// are rejected anywhere in the message, including inside params — detection is
-// tokenizer-level. Unrecognized envelope members are rejected. Params content
-// is otherwise not validated; it lands in a RawMessage for the handler to
-// decode, so unknown members inside it are tolerated.
+// Duplicate member names are rejected anywhere, including inside params, since
+// detection is tokenizer-level. Params content is otherwise not validated, so
+// unknown members inside it are the handler's concern.
 //
-// Per the spec params must be a structured value — an object or an array —
-// whenever the member is present, so null is rejected along with every other
-// scalar; a request with no parameters omits the member entirely. Required
-// members are deliberately not checked here — Serve rejects a missing method
-// or a wrong version on every path, including transports that build a Request
-// themselves.
+// Per the spec params must be an object or array whenever present, so null is
+// rejected like any other scalar; a request with no parameters omits the
+// member. Required members are not checked here — Serve rejects a missing
+// method or wrong version on every path, including transports that build a
+// Request themselves.
 func DecodeRequest(data jsontext.Value, req *Request) error {
 	d := jsontext.NewDecoder(bytes.NewReader(data))
 
@@ -344,9 +313,8 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 }
 
 // tokenError maps a tokenizer failure to the spec's error codes: a duplicate
-// member name is well-formed JSON that violates uniqueness (Invalid Request),
-// while anything else — a syntax error, a truncated or empty message — is
-// malformed input (Parse error).
+// member name is well-formed JSON violating uniqueness (Invalid Request),
+// anything else is malformed input (Parse error).
 func tokenError(err error) *Error {
 	if errors.Is(err, jsontext.ErrDuplicateName) {
 		return protocolError(CodeInvalidRequest, err.Error())
@@ -355,10 +323,8 @@ func tokenError(err error) *Error {
 }
 
 // classifyDecodeError maps a decode failure to the spec's error codes. A
-// decoder that already classified its own failure wins outright; otherwise
-// malformed JSON is a Parse error, and everything else — wrong shape,
-// duplicate member names (well-formed JSON that violates uniqueness),
-// unknown envelope members — is an Invalid Request.
+// decoder that classified its own failure wins outright; otherwise malformed
+// JSON is a Parse error and everything else an Invalid Request.
 func classifyDecodeError(err error) *Error {
 	// A typed-nil *Error inside a non-nil error must not be surfaced as the
 	// response error; fall through and classify it like any other failure.
@@ -381,8 +347,7 @@ func errorResponse(id jsontext.Value, e *Error) *Response {
 
 // recoveredID returns the id a failed decode managed to read, or nil when
 // there is none to trust. The spec requires a null id only when the id could
-// not be detected, so echoing one we did detect lets the client correlate the
-// error with the call that caused it.
+// not be detected, so echoing a detected one lets the client correlate.
 func recoveredID(req *Request) jsontext.Value {
 	if isValidID(req.ID) {
 		return req.ID
@@ -390,9 +355,8 @@ func recoveredID(req *Request) jsontext.Value {
 	return nil
 }
 
-// isValidID reports whether id is a JSON string, number, or null. JSON
-// bools, objects, and arrays are rejected. The spec discourages null and
-// non-integer numbers but does not forbid them, so we allow both.
+// isValidID reports whether id is a JSON string, number, or null. The spec
+// discourages null and non-integer numbers but does not forbid them.
 func isValidID(id jsontext.Value) bool {
 	switch id.Kind() {
 	case '"', '0', 'n': // string, any number, null

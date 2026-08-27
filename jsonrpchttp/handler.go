@@ -18,8 +18,8 @@ import (
 	"github.com/rykroon/jsonrpc"
 )
 
-// Handler adapts a *jsonrpc.Server to an http.Handler. JSON-RPC messages
-// are accepted as POST request bodies; responses are written as JSON.
+// Handler adapts a *jsonrpc.Server to an http.Handler, accepting JSON-RPC
+// messages as POST bodies and writing responses as JSON.
 type Handler struct {
 	// Server is the JSON-RPC server to dispatch to. Required.
 	Server *jsonrpc.Server
