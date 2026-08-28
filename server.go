@@ -110,13 +110,13 @@ func (s *Server) Register[P, R any](name string, fn TypedHandler[P, R], mw ...Mi
 func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	// Validate the ID first so later error responses never echo an invalid ID.
 	if !req.IsNotification() && !isValidID(req.ID) {
-		return errorResponse(nil, protocolError(CodeInvalidRequest, "id must be a string, number, or null"))
+		return errorResponse(nil, NewError(CodeInvalidRequest, "id must be a string, number, or null"))
 	}
 	if req.JSONRPC != Version {
-		return errorResponse(req.ID, protocolError(CodeInvalidRequest, `jsonrpc must be "2.0"`))
+		return errorResponse(req.ID, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`))
 	}
 	if req.Method == "" {
-		return errorResponse(req.ID, protocolError(CodeInvalidRequest, "missing method"))
+		return errorResponse(req.ID, NewError(CodeInvalidRequest, "missing method"))
 	}
 
 	s.mu.RLock()
@@ -128,7 +128,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		if req.IsNotification() {
 			return nil
 		}
-		return errorResponse(req.ID, protocolError(CodeMethodNotFound, "method not found: "+req.Method))
+		return errorResponse(req.ID, NewError(CodeMethodNotFound, "method not found: "+req.Method))
 	}
 
 	result, rpcErr := h(ctx, req.Params)
@@ -183,10 +183,10 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
 	var elems []jsontext.Value
 	if err := json.Unmarshal(data, &elems, jsontext.AllowDuplicateNames(true)); err != nil {
-		return marshalMessageError(protocolError(CodeParseError, err.Error()))
+		return marshalMessageError(NewError(CodeParseError, err.Error()))
 	}
 	if len(elems) == 0 {
-		return marshalMessageError(protocolError(CodeInvalidRequest, "empty batch"))
+		return marshalMessageError(NewError(CodeInvalidRequest, "empty batch"))
 	}
 	responses := make([]*Response, 0, len(elems))
 	for _, elem := range elems {
@@ -236,7 +236,7 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 		return tokenError(err)
 	}
 	if tok.Kind() != jsontext.KindBeginObject {
-		return protocolError(CodeInvalidRequest, "request must be a JSON object")
+		return NewError(CodeInvalidRequest, "request must be a JSON object")
 	}
 
 	for d.PeekKind() != jsontext.KindEndObject {
@@ -253,7 +253,7 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 				return tokenError(err)
 			}
 			if tok.Kind() != jsontext.KindString {
-				return protocolError(CodeInvalidRequest, "jsonrpc must be a string")
+				return NewError(CodeInvalidRequest, "jsonrpc must be a string")
 			}
 			// Whether the version is "2.0" is Serve's verdict, not the
 			// decoder's: failing here would discard an id we can read, and
@@ -266,7 +266,7 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 				return tokenError(err)
 			}
 			if tok.Kind() != jsontext.KindString {
-				return protocolError(CodeInvalidRequest, "method must be a string")
+				return NewError(CodeInvalidRequest, "method must be a string")
 			}
 			req.Method = tok.String()
 
@@ -282,7 +282,7 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 			default:
 				// Including null: the member is present, and null is not a
 				// structured value. Omit params entirely to send none.
-				return protocolError(CodeInvalidRequest, "params must be an object or array")
+				return NewError(CodeInvalidRequest, "params must be an object or array")
 			}
 
 		case "id":
@@ -293,7 +293,7 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 			req.ID = jsontext.Value(val.Clone())
 
 		default:
-			return protocolError(CodeInvalidRequest, "unknown member: "+name)
+			return NewError(CodeInvalidRequest, "unknown member: "+name)
 		}
 	}
 
@@ -307,7 +307,7 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 		if err != nil {
 			return tokenError(err)
 		}
-		return protocolError(CodeParseError, "unexpected data after top-level value")
+		return NewError(CodeParseError, "unexpected data after top-level value")
 	}
 	return nil
 }
@@ -317,9 +317,9 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 // anything else is malformed input (Parse error).
 func tokenError(err error) *Error {
 	if errors.Is(err, jsontext.ErrDuplicateName) {
-		return protocolError(CodeInvalidRequest, err.Error())
+		return NewError(CodeInvalidRequest, err.Error())
 	}
-	return protocolError(CodeParseError, err.Error())
+	return NewError(CodeParseError, err.Error())
 }
 
 // classifyDecodeError maps a decode failure to the spec's error codes. A
@@ -333,9 +333,9 @@ func classifyDecodeError(err error) *Error {
 	}
 	var syntaxErr *jsontext.SyntacticError
 	if errors.As(err, &syntaxErr) && !errors.Is(err, jsontext.ErrDuplicateName) {
-		return protocolError(CodeParseError, err.Error())
+		return NewError(CodeParseError, err.Error())
 	}
-	return protocolError(CodeInvalidRequest, err.Error())
+	return NewError(CodeInvalidRequest, err.Error())
 }
 
 func errorResponse(id jsontext.Value, e *Error) *Response {

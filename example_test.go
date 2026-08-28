@@ -132,8 +132,7 @@ func ExampleServer_ServeMessage() {
 // default chose while adding the offending message to Data.
 func ExampleServer_SetRequestDecoder() {
 	type errorData struct {
-		Details string `json:"details"`
-		Got     string `json:"got"`
+		Got string `json:"got"`
 	}
 
 	s := jsonrpc.NewServer()
@@ -144,11 +143,8 @@ func ExampleServer_SetRequestDecoder() {
 			// Not a classified error: let the server classify it.
 			return err
 		}
-		var d errorData
-		_ = e.UnmarshalData(&d)
-		d.Got = string(data)
 		// Returning an *Error hands the client exactly this object.
-		return jsonrpc.NewError(e.Code, e.Message).MustSetData(d)
+		return jsonrpc.NewError(e.Code, e.Message).MustSetData(errorData{Got: string(data)})
 	})
 	s.Register("add", func(_ context.Context, p struct {
 		A, B int
@@ -159,5 +155,5 @@ func ExampleServer_SetRequestDecoder() {
 	out, _ := s.ServeMessage(context.Background(),
 		[]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`))
 	fmt.Println(string(out))
-	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Request","data":{"details":"unknown member: surprise","got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
+	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"unknown member: surprise","data":{"got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
 }

@@ -8,8 +8,8 @@ import (
 )
 
 // DecodeParams unmarshals raw into a fresh P; empty raw returns the zero P
-// with no error. Failure is reported as CodeInvalidParams, with the cause in
-// Error.Data.
+// with no error. Failure is reported as CodeInvalidParams, with the cause as
+// the message.
 //
 // Decoding follows encoding/json/v2 semantics: duplicate names and invalid
 // UTF-8 are rejected, names match fields case-sensitively, and unknown
@@ -20,17 +20,17 @@ func DecodeParams[P any](raw jsontext.Value) (P, *Error) {
 		return p, nil
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return p, protocolError(CodeInvalidParams, err.Error())
+		return p, NewError(CodeInvalidParams, err.Error())
 	}
 	return p, nil
 }
 
 // MarshalResult marshals v, reporting failure as CodeInternalError with the
-// cause in Error.Data.
+// cause as the message.
 func MarshalResult(v any) (jsontext.Value, *Error) {
 	out, err := json.Marshal(v)
 	if err != nil {
-		return nil, protocolError(CodeInternalError, err.Error())
+		return nil, NewError(CodeInternalError, err.Error())
 	}
 	return out, nil
 }

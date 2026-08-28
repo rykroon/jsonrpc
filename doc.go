@@ -24,9 +24,9 @@
 // work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing,
 // the spec's in-band parse error reporting, and batch messages (JSON
 // arrays), which are dispatched per element. Protocol errors carry the
-// spec's canonical message, with the specific cause in Error.Data as
-// {"details": ...}. HTTP adapters that prefer to surface parse failures as
-// HTTP 400 should skip ServeMessage and call Serve directly.
+// specific cause as their message and attach no Data. HTTP adapters that
+// prefer to surface parse failures as HTTP 400 should skip ServeMessage and
+// call Serve directly.
 //
 // # Decoding
 //

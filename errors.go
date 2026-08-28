@@ -63,30 +63,3 @@ func (e *Error) UnmarshalData(into any) error {
 	}
 	return json.Unmarshal(e.Data, into)
 }
-
-// canonicalMessage returns the spec's message for a reserved protocol code.
-func canonicalMessage(code int) string {
-	switch code {
-	case CodeParseError:
-		return "Parse error"
-	case CodeInvalidRequest:
-		return "Invalid Request"
-	case CodeMethodNotFound:
-		return "Method not found"
-	case CodeInvalidParams:
-		return "Invalid params"
-	default:
-		return "Internal error"
-	}
-}
-
-// protocolError builds a library-generated protocol error: the spec's
-// canonical message, with the cause in Data as {"details": ...}. Errors from
-// handlers are never rewritten this way.
-func protocolError(code int, details string) *Error {
-	e := NewError(code, canonicalMessage(code))
-	e.Data, _ = json.Marshal(struct {
-		Details string `json:"details"`
-	}{details})
-	return e
-}
