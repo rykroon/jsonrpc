@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	jsonv1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -42,6 +43,24 @@ func mustParams(t *testing.T, v any) jsontext.Value {
 	return p
 }
 
+// decodeResponse parses one marshaled response off the wire. Response is an
+// interface, so tests go through DecodeResponse rather than unmarshaling into
+// a struct.
+func decodeResponse(t *testing.T, data jsontext.Value) Response {
+	t.Helper()
+	resp, err := DecodeResponse(data)
+	require.NoError(t, err)
+	return resp
+}
+
+// decodeResponses parses a marshaled batch reply.
+func decodeResponses(t *testing.T, data jsontext.Value) []Response {
+	t.Helper()
+	resps, err := DecodeResponses(data)
+	require.NoError(t, err)
+	return resps
+}
+
 func TestClientSend(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(s.Sender())
@@ -49,7 +68,7 @@ func TestClientSend(t *testing.T) {
 	req := NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1))
 	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
-	require.Nil(t, resp.Error)
+	require.Nil(t, resp.Error())
 
 	var got addResult
 	require.NoError(t, resp.Decode(&got))
@@ -63,10 +82,10 @@ func TestClientSendRPCError(t *testing.T) {
 	req := NewRequest("fail", mustParams(t, struct{}{}), NewID(1))
 	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
-	require.NotNil(t, resp.Error)
-	require.Equal(t, -32001, resp.Error.Code)
-	require.Equal(t, "custom", resp.Error.Message)
-	require.JSONEq(t, `{"x":1}`, string(resp.Error.Data))
+	require.NotNil(t, resp.Error())
+	require.Equal(t, -32001, resp.Error().Code)
+	require.Equal(t, "custom", resp.Error().Message)
+	require.JSONEq(t, `{"x":1}`, string(resp.Error().Data))
 }
 
 func TestClientSendInternalError(t *testing.T) {
@@ -76,8 +95,8 @@ func TestClientSendInternalError(t *testing.T) {
 	req := NewRequest("boom", mustParams(t, struct{}{}), NewID(1))
 	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInternalError, resp.Error.Code)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInternalError, resp.Error().Code)
 }
 
 func TestMethodNotFound(t *testing.T) {
@@ -87,8 +106,8 @@ func TestMethodNotFound(t *testing.T) {
 	req := NewRequest("missing", nil, NewID(1))
 	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeMethodNotFound, resp.Error.Code)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeMethodNotFound, resp.Error().Code)
 }
 
 func TestNotificationProducesNoResponse(t *testing.T) {
@@ -149,8 +168,8 @@ func TestTypedNilErrorBecomesInternalError(t *testing.T) {
 
 	resp := s.Serve(context.Background(), NewRequest("nilerr", nil, NewID(1)))
 	require.NotNil(t, resp)
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInternalError, resp.Error.Code)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInternalError, resp.Error().Code)
 }
 
 func TestInvalidIDNotEchoedOnVersionError(t *testing.T) {
@@ -161,9 +180,9 @@ func TestInvalidIDNotEchoedOnVersionError(t *testing.T) {
 		ID:      jsontext.Value(`{"x":1}`),
 	})
 	require.NotNil(t, resp)
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
-	require.JSONEq(t, "null", string(resp.ID))
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInvalidRequest, resp.Error().Code)
+	require.JSONEq(t, "null", string(resp.ID()))
 }
 
 func TestClientCall(t *testing.T) {
@@ -217,7 +236,7 @@ func TestErrorMustSetData(t *testing.T) {
 func TestClientCallGeneratesUniqueIDs(t *testing.T) {
 	s := newTestServer(t)
 	var ids []string
-	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
+	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (Response, error) {
 		ids = append(ids, string(req.ID))
 		return s.Serve(ctx, req), nil
 	}))
@@ -248,9 +267,9 @@ func TestInvalidJSONRPCVersion(t *testing.T) {
 		ID:      NewID(1),
 	})
 	require.NotNil(t, resp)
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
-	require.JSONEq(t, "1", string(resp.ID))
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInvalidRequest, resp.Error().Code)
+	require.JSONEq(t, "1", string(resp.ID()))
 }
 
 func TestRequestRoundTripPreservesStringID(t *testing.T) {
@@ -273,10 +292,140 @@ func TestRequestNotificationHasNoIDField(t *testing.T) {
 }
 
 func TestResponseAlwaysHasID(t *testing.T) {
-	resp := &Response{JSONRPC: Version, ID: jsontext.Value("null"), Error: NewError(CodeParseError, "bad")}
-	b, err := json.Marshal(resp)
+	// Both shapes carry an id member, even when it is null, and a success
+	// response always carries a result member, even when it is null. The
+	// constructors normalize an empty value, so this holds by construction.
+	b, err := json.Marshal(NewErrorResponse(NewError(CodeParseError, "bad"), nil))
 	require.NoError(t, err)
 	require.Contains(t, string(b), `"id":null`)
+
+	b, err = json.Marshal(NewSuccessResponse(nil, nil))
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"id":null`)
+	require.Contains(t, string(b), `"result":null`)
+}
+
+func TestResponseMarshalsExactShape(t *testing.T) {
+	ok := NewSuccessResponse(jsontext.Value(`{"sum":3}`), NewID(1))
+	b, err := json.Marshal(ok)
+	require.NoError(t, err)
+	require.Equal(t, `{"jsonrpc":"2.0","result":{"sum":3},"id":1}`, string(b))
+
+	bad := NewErrorResponse(NewError(CodeMethodNotFound, "nope"), NewID("x"))
+	b, err = json.Marshal(bad)
+	require.NoError(t, err)
+	require.Equal(t, `{"jsonrpc":"2.0","error":{"code":-32601,"message":"nope"},"id":"x"}`, string(b))
+
+	// Member order must not depend on which json package the caller reaches
+	// for: the examples marshal responses with v1, ServeMessage with v2.
+	v1, err := jsonv1.Marshal(ok)
+	require.NoError(t, err)
+	require.Equal(t, `{"jsonrpc":"2.0","result":{"sum":3},"id":1}`, string(v1))
+}
+
+// MarshalJSONTo writes the raw members with WriteValue, which rejects an
+// empty or malformed value rather than emitting invalid JSON. Only a response
+// built by hand inside this package can get into that state.
+func TestResponseMarshalRejectsBadRawValue(t *testing.T) {
+	_, err := json.Marshal(&SuccessResponse{result: nil, id: NewID(1)})
+	require.Error(t, err, "an empty result is not JSON null")
+
+	_, err = json.Marshal(&SuccessResponse{result: jsontext.Value(`{oops`), id: NewID(1)})
+	require.Error(t, err, "a malformed result must not reach the wire")
+
+	_, err = json.Marshal(&ErrorResponse{err: NewError(CodeInternalError, "x"), id: nil})
+	require.Error(t, err, "an empty id is not JSON null")
+}
+
+func TestServeReturnsConcreteResponseTypes(t *testing.T) {
+	s := newTestServer(t)
+
+	ok := s.Serve(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
+	require.IsType(t, &SuccessResponse{}, ok)
+	require.True(t, ok.IsSuccess())
+	require.False(t, ok.IsError())
+	require.Nil(t, ok.Error())
+	require.JSONEq(t, `{"sum":5}`, string(ok.Result()))
+
+	bad := s.Serve(context.Background(), NewRequest("missing", nil, NewID(1)))
+	require.IsType(t, &ErrorResponse{}, bad)
+	require.True(t, bad.IsError())
+	require.False(t, bad.IsSuccess())
+	require.Nil(t, bad.Result(), "an error response carries no result")
+	require.Error(t, bad.Decode(new(addResult)), "decoding an error response reports an error")
+}
+
+func TestDecodeResponse(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want any // a *SuccessResponse or *ErrorResponse, or nil to expect failure
+	}{
+		{"success", `{"jsonrpc":"2.0","result":{"sum":3},"id":1}`, &SuccessResponse{}},
+		{"null result is a success", `{"jsonrpc":"2.0","result":null,"id":1}`, &SuccessResponse{}},
+		{"error", `{"jsonrpc":"2.0","error":{"code":-32601,"message":"nope"},"id":1}`, &ErrorResponse{}},
+		{"null id", `{"jsonrpc":"2.0","error":{"code":-32700,"message":"nope"},"id":null}`, &ErrorResponse{}},
+		{"unknown members are tolerated", `{"jsonrpc":"2.0","result":1,"id":1,"extra":true}`, &SuccessResponse{}},
+		{"both result and error", `{"jsonrpc":"2.0","result":1,"error":{"code":-1,"message":"x"},"id":1}`, nil},
+		{"neither result nor error", `{"jsonrpc":"2.0","id":1}`, nil},
+		{"wrong version", `{"jsonrpc":"1.0","result":1,"id":1}`, nil},
+		{"missing id", `{"jsonrpc":"2.0","result":1}`, nil},
+		{"duplicate member", `{"jsonrpc":"2.0","result":1,"result":2,"id":1}`, nil},
+		{"not an object", `[1]`, nil},
+		{"malformed", `{"jsonrpc":`, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := DecodeResponse([]byte(tc.in))
+			if tc.want == nil {
+				require.Error(t, err)
+				require.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			require.IsType(t, tc.want, got)
+			require.NotEmpty(t, got.ID())
+		})
+	}
+}
+
+func TestDecodeResponseRoundTrip(t *testing.T) {
+	s := newTestServer(t)
+
+	out, err := s.ServeMessage(context.Background(),
+		[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":"abc"}`))
+	require.NoError(t, err)
+
+	resp := decodeResponse(t, out)
+	require.True(t, resp.IsSuccess())
+	require.JSONEq(t, `"abc"`, string(resp.ID()))
+
+	var got addResult
+	require.NoError(t, resp.Decode(&got))
+	require.Equal(t, addResult{Sum: 3}, got)
+}
+
+func TestDecodeResponsesRejectsBadElement(t *testing.T) {
+	_, err := DecodeResponses([]byte(`[{"jsonrpc":"2.0","result":1,"id":1},{"jsonrpc":"2.0","id":2}]`))
+	require.ErrorContains(t, err, "element 1")
+
+	// A single response is not a batch.
+	_, err = DecodeResponses([]byte(`{"jsonrpc":"2.0","result":1,"id":1}`))
+	require.Error(t, err)
+}
+
+// A Sender is free to build a Response itself, so Call must not report a
+// failure it cannot name: an *ErrorResponse holding a nil *Error would
+// otherwise return a non-nil error interface wrapping a nil pointer.
+func TestClientCallErrorResponseWithoutErrorObject(t *testing.T) {
+	c := NewClient(SenderFunc(func(_ context.Context, req *Request) (Response, error) {
+		return NewErrorResponse(nil, req.ID), nil
+	}))
+
+	err := c.Call(context.Background(), "add", addParams{A: 1, B: 2}, nil)
+	require.ErrorContains(t, err, "no error object")
+	_, isRPCErr := errors.AsType[*Error](err)
+	require.False(t, isRPCErr)
 }
 
 func TestMessageServerSingleRequest(t *testing.T) {
@@ -285,11 +434,10 @@ func TestMessageServerSingleRequest(t *testing.T) {
 	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
-	var resp Response
-	require.NoError(t, json.Unmarshal(out, &resp))
-	require.Nil(t, resp.Error)
-	require.JSONEq(t, `{"sum":3}`, string(resp.Result))
-	require.JSONEq(t, "1", string(resp.ID))
+	resp := decodeResponse(t, out)
+	require.Nil(t, resp.Error())
+	require.JSONEq(t, `{"sum":3}`, string(resp.Result()))
+	require.JSONEq(t, "1", string(resp.ID()))
 }
 
 func TestMessageServerNotification(t *testing.T) {
@@ -312,11 +460,10 @@ func TestMessageServerParseError(t *testing.T) {
 	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
-	var resp Response
-	require.NoError(t, json.Unmarshal(out, &resp))
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeParseError, resp.Error.Code)
-	require.JSONEq(t, "null", string(resp.ID))
+	resp := decodeResponse(t, out)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeParseError, resp.Error().Code)
+	require.JSONEq(t, "null", string(resp.ID()))
 }
 
 func TestBatchTwoCalls(t *testing.T) {
@@ -328,15 +475,14 @@ func TestBatchTwoCalls(t *testing.T) {
 	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
-	var resps []Response
-	require.NoError(t, json.Unmarshal(out, &resps))
+	resps := decodeResponses(t, out)
 	require.Len(t, resps, 2)
-	require.Nil(t, resps[0].Error)
-	require.JSONEq(t, "1", string(resps[0].ID))
-	require.JSONEq(t, `{"sum":3}`, string(resps[0].Result))
-	require.Nil(t, resps[1].Error)
-	require.JSONEq(t, "2", string(resps[1].ID))
-	require.JSONEq(t, `{"sum":30}`, string(resps[1].Result))
+	require.Nil(t, resps[0].Error())
+	require.JSONEq(t, "1", string(resps[0].ID()))
+	require.JSONEq(t, `{"sum":3}`, string(resps[0].Result()))
+	require.Nil(t, resps[1].Error())
+	require.JSONEq(t, "2", string(resps[1].ID()))
+	require.JSONEq(t, `{"sum":30}`, string(resps[1].Result()))
 }
 
 func TestBatchMixedCallsAndNotifications(t *testing.T) {
@@ -348,11 +494,10 @@ func TestBatchMixedCallsAndNotifications(t *testing.T) {
 	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
-	var resps []Response
-	require.NoError(t, json.Unmarshal(out, &resps))
+	resps := decodeResponses(t, out)
 	require.Len(t, resps, 1)
-	require.JSONEq(t, "7", string(resps[0].ID))
-	require.JSONEq(t, `{"sum":5}`, string(resps[0].Result))
+	require.JSONEq(t, "7", string(resps[0].ID()))
+	require.JSONEq(t, `{"sum":5}`, string(resps[0].Result()))
 }
 
 func TestBatchAllNotificationsProducesNoReply(t *testing.T) {
@@ -372,11 +517,10 @@ func TestBatchEmptyIsSingleError(t *testing.T) {
 	require.NoError(t, err)
 
 	// The spec answers an empty batch with one Response object, not an array.
-	var resp Response
-	require.NoError(t, json.Unmarshal(out, &resp))
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
-	require.JSONEq(t, "null", string(resp.ID))
+	resp := decodeResponse(t, out)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInvalidRequest, resp.Error().Code)
+	require.JSONEq(t, "null", string(resp.ID()))
 }
 
 func TestBatchInvalidElements(t *testing.T) {
@@ -386,24 +530,22 @@ func TestBatchInvalidElements(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(), []byte(`[1]`))
 		require.NoError(t, err)
 
-		var resps []Response
-		require.NoError(t, json.Unmarshal(out, &resps))
+		resps := decodeResponses(t, out)
 		require.Len(t, resps, 1)
-		require.NotNil(t, resps[0].Error)
-		require.Equal(t, CodeInvalidRequest, resps[0].Error.Code)
-		require.JSONEq(t, "null", string(resps[0].ID))
+		require.NotNil(t, resps[0].Error())
+		require.Equal(t, CodeInvalidRequest, resps[0].Error().Code)
+		require.JSONEq(t, "null", string(resps[0].ID()))
 	})
 
 	t.Run("three invalid elements", func(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(), []byte(`[1,2,3]`))
 		require.NoError(t, err)
 
-		var resps []Response
-		require.NoError(t, json.Unmarshal(out, &resps))
+		resps := decodeResponses(t, out)
 		require.Len(t, resps, 3)
 		for _, r := range resps {
-			require.NotNil(t, r.Error)
-			require.Equal(t, CodeInvalidRequest, r.Error.Code)
+			require.NotNil(t, r.Error())
+			require.Equal(t, CodeInvalidRequest, r.Error().Code)
 		}
 	})
 }
@@ -414,11 +556,10 @@ func TestBatchMalformedJSONIsSingleParseError(t *testing.T) {
 	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
-	var resp Response
-	require.NoError(t, json.Unmarshal(out, &resp))
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeParseError, resp.Error.Code)
-	require.JSONEq(t, "null", string(resp.ID))
+	resp := decodeResponse(t, out)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeParseError, resp.Error().Code)
+	require.JSONEq(t, "null", string(resp.ID()))
 }
 
 func TestBatchMixedValidAndInvalid(t *testing.T) {
@@ -432,23 +573,22 @@ func TestBatchMixedValidAndInvalid(t *testing.T) {
 	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
-	var resps []Response
-	require.NoError(t, json.Unmarshal(out, &resps))
+	resps := decodeResponses(t, out)
 	// The notification is omitted; the valid call, the garbage element, and
 	// the bad-version request each produce an entry, in request order.
 	require.Len(t, resps, 3)
 
-	require.Nil(t, resps[0].Error)
-	require.JSONEq(t, `"ok"`, string(resps[0].ID))
-	require.JSONEq(t, `{"sum":3}`, string(resps[0].Result))
+	require.Nil(t, resps[0].Error())
+	require.JSONEq(t, `"ok"`, string(resps[0].ID()))
+	require.JSONEq(t, `{"sum":3}`, string(resps[0].Result()))
 
-	require.NotNil(t, resps[1].Error)
-	require.Equal(t, CodeInvalidRequest, resps[1].Error.Code)
-	require.JSONEq(t, "null", string(resps[1].ID))
+	require.NotNil(t, resps[1].Error())
+	require.Equal(t, CodeInvalidRequest, resps[1].Error().Code)
+	require.JSONEq(t, "null", string(resps[1].ID()))
 
-	require.NotNil(t, resps[2].Error)
-	require.Equal(t, CodeInvalidRequest, resps[2].Error.Code)
-	require.JSONEq(t, "9", string(resps[2].ID))
+	require.NotNil(t, resps[2].Error())
+	require.Equal(t, CodeInvalidRequest, resps[2].Error().Code)
+	require.JSONEq(t, "9", string(resps[2].ID()))
 }
 
 func TestMessageServerInvalidShape(t *testing.T) {
@@ -457,10 +597,9 @@ func TestMessageServerInvalidShape(t *testing.T) {
 	out, err := s.ServeMessage(context.Background(), data)
 	require.NoError(t, err)
 
-	var resp Response
-	require.NoError(t, json.Unmarshal(out, &resp))
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+	resp := decodeResponse(t, out)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInvalidRequest, resp.Error().Code)
 }
 
 func TestServerRejectsInvalidIDs(t *testing.T) {
@@ -484,10 +623,10 @@ func TestServerRejectsInvalidIDs(t *testing.T) {
 				ID:      jsontext.Value(tc.id),
 			})
 			require.NotNil(t, resp)
-			require.NotNil(t, resp.Error)
-			require.Equal(t, CodeInvalidRequest, resp.Error.Code)
-			require.Contains(t, resp.Error.Message, "id")
-			require.JSONEq(t, "null", string(resp.ID))
+			require.NotNil(t, resp.Error())
+			require.Equal(t, CodeInvalidRequest, resp.Error().Code)
+			require.Contains(t, resp.Error().Message, "id")
+			require.JSONEq(t, "null", string(resp.ID()))
 		})
 	}
 }
@@ -518,8 +657,8 @@ func TestServerAcceptsValidIDs(t *testing.T) {
 				ID:      jsontext.Value(tc.id),
 			})
 			require.NotNil(t, resp)
-			require.Nil(t, resp.Error)
-			require.JSONEq(t, tc.id, string(resp.ID))
+			require.Nil(t, resp.Error())
+			require.JSONEq(t, tc.id, string(resp.ID()))
 		})
 	}
 }
@@ -527,7 +666,7 @@ func TestServerAcceptsValidIDs(t *testing.T) {
 func TestSendPropagatesCallerID(t *testing.T) {
 	s := newTestServer(t)
 	var seen jsontext.Value
-	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
+	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (Response, error) {
 		seen = append(seen[:0], req.ID...)
 		return s.Serve(ctx, req), nil
 	}))
@@ -535,9 +674,9 @@ func TestSendPropagatesCallerID(t *testing.T) {
 	req := NewRequest("add", mustParams(t, addParams{A: 1, B: 2}), NewID("req-abc"))
 	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
-	require.Nil(t, resp.Error)
+	require.Nil(t, resp.Error())
 	require.JSONEq(t, `"req-abc"`, string(seen))
-	require.JSONEq(t, `"req-abc"`, string(resp.ID))
+	require.JSONEq(t, `"req-abc"`, string(resp.ID()))
 }
 
 func TestNewIDIntegerForms(t *testing.T) {
@@ -584,18 +723,18 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 
 	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
 	require.NoError(t, err)
-	require.Nil(t, resp.Error)
+	require.Nil(t, resp.Error())
 	var ok addResult
 	require.NoError(t, resp.Decode(&ok))
 	require.Equal(t, 5, ok.Sum)
 
 	resp, err = c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: -1, B: 3}), NewID(2)))
 	require.NoError(t, err)
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInvalidParams, resp.Error.Code)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInvalidParams, resp.Error().Code)
 
 	var detail map[string]int
-	require.NoError(t, resp.Error.UnmarshalData(&detail))
+	require.NoError(t, resp.Error().UnmarshalData(&detail))
 	require.Equal(t, -1, detail["a"])
 	require.Equal(t, 3, detail["b"])
 }
@@ -634,15 +773,15 @@ func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
 
 	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
 	require.NoError(t, err)
-	require.Nil(t, resp.Error)
+	require.Nil(t, resp.Error())
 	var ok addResult
 	require.NoError(t, resp.Decode(&ok))
 	require.Equal(t, 5, ok.Sum)
 
 	resp, err = c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: -1, B: 3}), NewID(2)))
 	require.NoError(t, err)
-	require.NotNil(t, resp.Error)
-	require.Equal(t, CodeInvalidParams, resp.Error.Code)
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInvalidParams, resp.Error().Code)
 }
 
 func TestMiddlewareOrdering(t *testing.T) {
@@ -657,7 +796,7 @@ func TestMiddlewareOrdering(t *testing.T) {
 	c := NewClient(s.Sender())
 	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 1, B: 1}), NewID(1)))
 	require.NoError(t, err)
-	require.Nil(t, resp.Error)
+	require.Nil(t, resp.Error())
 	// Server middleware wraps around per-method middleware; mw[0] is outermost.
 	require.Equal(t, []string{"server1", "server2", "method1", "method2", "handler"}, log)
 }
@@ -677,16 +816,15 @@ func TestProtocolErrorsCarryTheCauseAsMessage(t *testing.T) {
 
 	out, err := s.ServeMessage(context.Background(), []byte(`{not valid json`))
 	require.NoError(t, err)
-	var resp Response
-	require.NoError(t, json.Unmarshal(out, &resp))
-	require.Equal(t, CodeParseError, resp.Error.Code)
-	require.NotEmpty(t, resp.Error.Message)
-	require.Empty(t, resp.Error.Data, "library errors attach no Data")
+	resp := decodeResponse(t, out)
+	require.Equal(t, CodeParseError, resp.Error().Code)
+	require.NotEmpty(t, resp.Error().Message)
+	require.Empty(t, resp.Error().Data, "library errors attach no Data")
 
 	r := s.Serve(context.Background(), NewRequest("missing", nil, NewID(1)))
-	require.Equal(t, CodeMethodNotFound, r.Error.Code)
-	require.Contains(t, r.Error.Message, "missing")
-	require.Empty(t, r.Error.Data, "library errors attach no Data")
+	require.Equal(t, CodeMethodNotFound, r.Error().Code)
+	require.Contains(t, r.Error().Message, "missing")
+	require.Empty(t, r.Error().Data, "library errors attach no Data")
 }
 
 func TestDuplicateMemberNamesRejected(t *testing.T) {
@@ -696,20 +834,18 @@ func TestDuplicateMemberNamesRejected(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(),
 			[]byte(`{"jsonrpc":"2.0","method":"add","method":"boom","id":1}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.NotNil(t, resp.Error)
-		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+		resp := decodeResponse(t, out)
+		require.NotNil(t, resp.Error())
+		require.Equal(t, CodeInvalidRequest, resp.Error().Code)
 	})
 
 	t.Run("duplicate inside params", func(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(),
 			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"a":2,"b":3},"id":1}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.NotNil(t, resp.Error)
-		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+		resp := decodeResponse(t, out)
+		require.NotNil(t, resp.Error())
+		require.Equal(t, CodeInvalidRequest, resp.Error().Code)
 	})
 
 	t.Run("duplicate params via Serve go through DecodeParams", func(t *testing.T) {
@@ -721,8 +857,8 @@ func TestDuplicateMemberNamesRejected(t *testing.T) {
 			Params:  jsontext.Value(`{"a":1,"a":2}`),
 			ID:      NewID(1),
 		})
-		require.NotNil(t, resp.Error)
-		require.Equal(t, CodeInvalidParams, resp.Error.Code)
+		require.NotNil(t, resp.Error())
+		require.Equal(t, CodeInvalidParams, resp.Error().Code)
 	})
 
 	t.Run("duplicate in one batch element fails only that element", func(t *testing.T) {
@@ -731,15 +867,14 @@ func TestDuplicateMemberNamesRejected(t *testing.T) {
 			{"jsonrpc":"2.0","method":"add","method":"boom","id":2}
 		]`))
 		require.NoError(t, err)
-		var resps []Response
-		require.NoError(t, json.Unmarshal(out, &resps))
+		resps := decodeResponses(t, out)
 		require.Len(t, resps, 2)
-		require.Nil(t, resps[0].Error)
-		require.JSONEq(t, `{"sum":3}`, string(resps[0].Result))
-		require.NotNil(t, resps[1].Error)
-		require.Equal(t, CodeInvalidRequest, resps[1].Error.Code)
+		require.Nil(t, resps[0].Error())
+		require.JSONEq(t, `{"sum":3}`, string(resps[0].Result()))
+		require.NotNil(t, resps[1].Error())
+		require.Equal(t, CodeInvalidRequest, resps[1].Error().Code)
 		// The offending element's id cannot be trusted, so the entry has id null.
-		require.JSONEq(t, "null", string(resps[1].ID))
+		require.JSONEq(t, "null", string(resps[1].ID()))
 	})
 }
 
@@ -750,20 +885,18 @@ func TestEnvelopeStrictness(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(),
 			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1,"extra":true}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.NotNil(t, resp.Error)
-		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
+		resp := decodeResponse(t, out)
+		require.NotNil(t, resp.Error())
+		require.Equal(t, CodeInvalidRequest, resp.Error().Code)
 	})
 
 	t.Run("unknown member inside params tolerated", func(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(),
 			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2,"ignored":9},"id":1}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.Nil(t, resp.Error)
-		require.JSONEq(t, `{"sum":3}`, string(resp.Result))
+		resp := decodeResponse(t, out)
+		require.Nil(t, resp.Error())
+		require.JSONEq(t, `{"sum":3}`, string(resp.Result()))
 	})
 }
 
@@ -774,7 +907,7 @@ func TestParamsAsRawMessagePassThrough(t *testing.T) {
 	req := NewRequest("add", jsontext.Value(`{"a":7,"b":8}`), NewID(1))
 	resp, err := c.Send(context.Background(), req)
 	require.NoError(t, err)
-	require.Nil(t, resp.Error)
+	require.Nil(t, resp.Error())
 	var got addResult
 	require.NoError(t, resp.Decode(&got))
 	require.Equal(t, 15, got.Sum)
@@ -786,10 +919,9 @@ func decodeError(t *testing.T, s *Server, msg string) (int, string, jsontext.Val
 	t.Helper()
 	out, err := s.ServeMessage(context.Background(), []byte(msg))
 	require.NoError(t, err)
-	var resp Response
-	require.NoError(t, json.Unmarshal(out, &resp))
-	require.NotNil(t, resp.Error, "expected an error response for %s", msg)
-	return resp.Error.Code, resp.Error.Message, resp.ID
+	resp := decodeResponse(t, out)
+	require.NotNil(t, resp.Error(), "expected an error response for %s", msg)
+	return resp.Error().Code, resp.Error().Message, resp.ID()
 }
 
 func TestDefaultDecoderRejections(t *testing.T) {
@@ -845,10 +977,9 @@ func TestDefaultDecoderAcceptsBothParamsShapes(t *testing.T) {
 	} {
 		out, err := s.ServeMessage(context.Background(), []byte(msg))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.Nil(t, resp.Error)
-		require.JSONEq(t, `{"sum":3}`, string(resp.Result))
+		resp := decodeResponse(t, out)
+		require.Nil(t, resp.Error())
+		require.JSONEq(t, `{"sum":3}`, string(resp.Result()))
 	}
 }
 
@@ -866,9 +997,8 @@ func TestDefaultDecoderOmittedParams(t *testing.T) {
 	out, err := s.ServeMessage(context.Background(),
 		[]byte(`{"jsonrpc":"2.0","method":"probe","id":1}`))
 	require.NoError(t, err)
-	var resp Response
-	require.NoError(t, json.Unmarshal(out, &resp))
-	require.Nil(t, resp.Error)
+	resp := decodeResponse(t, out)
+	require.Nil(t, resp.Error())
 	require.True(t, called)
 	require.Nil(t, seen)
 }
@@ -897,10 +1027,9 @@ func TestDecodeErrorEchoesRecoveredID(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(),
 			[]byte(`{"jsonrpc":"1.0","method":"add","id":9}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
-		require.JSONEq(t, "9", string(resp.ID))
+		resp := decodeResponse(t, out)
+		require.Equal(t, CodeInvalidRequest, resp.Error().Code)
+		require.JSONEq(t, "9", string(resp.ID()))
 	})
 }
 
@@ -916,15 +1045,14 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 		out, err := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"add","id":1}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
+		resp := decodeResponse(t, out)
 		// The server must not have rewritten any of it.
-		require.Equal(t, -32050, resp.Error.Code)
-		require.Equal(t, "bad envelope", resp.Error.Message)
+		require.Equal(t, -32050, resp.Error().Code)
+		require.Equal(t, "bad envelope", resp.Error().Message)
 		var hint struct {
 			Hint string `json:"hint"`
 		}
-		require.NoError(t, resp.Error.UnmarshalData(&hint))
+		require.NoError(t, resp.Error().UnmarshalData(&hint))
 		require.Equal(t, "read the docs", hint.Hint)
 	})
 
@@ -936,10 +1064,9 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 		out, err := s.ServeMessage(context.Background(), []byte(`{}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.Equal(t, -32050, resp.Error.Code)
-		require.Equal(t, "bad envelope", resp.Error.Message)
+		resp := decodeResponse(t, out)
+		require.Equal(t, -32050, resp.Error().Code)
+		require.Equal(t, "bad envelope", resp.Error().Message)
 	})
 
 	t.Run("plain error is classified as Invalid Request", func(t *testing.T) {
@@ -998,10 +1125,9 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(),
 			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1,"extra":true}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.Nil(t, resp.Error)
-		require.JSONEq(t, `{"sum":3}`, string(resp.Result))
+		resp := decodeResponse(t, out)
+		require.Nil(t, resp.Error())
+		require.JSONEq(t, `{"sum":3}`, string(resp.Result()))
 	})
 
 	t.Run("applies to every batch element", func(t *testing.T) {
@@ -1010,13 +1136,12 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 			{"jsonrpc":"2.0","method":"add","params":{"a":3,"b":4},"id":2,"other":1}
 		]`))
 		require.NoError(t, err)
-		var resps []Response
-		require.NoError(t, json.Unmarshal(out, &resps))
+		resps := decodeResponses(t, out)
 		require.Len(t, resps, 2)
-		require.Nil(t, resps[0].Error)
-		require.Nil(t, resps[1].Error)
-		require.JSONEq(t, `{"sum":3}`, string(resps[0].Result))
-		require.JSONEq(t, `{"sum":7}`, string(resps[1].Result))
+		require.Nil(t, resps[0].Error())
+		require.Nil(t, resps[1].Error())
+		require.JSONEq(t, `{"sum":3}`, string(resps[0].Result()))
+		require.JSONEq(t, `{"sum":7}`, string(resps[1].Result()))
 	})
 
 	t.Run("Serve still owns the version verdict", func(t *testing.T) {
@@ -1029,10 +1154,9 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 		})
 		out, err := s.ServeMessage(context.Background(), []byte(`{}`))
 		require.NoError(t, err)
-		var resp Response
-		require.NoError(t, json.Unmarshal(out, &resp))
-		require.Equal(t, CodeInvalidRequest, resp.Error.Code)
-		require.JSONEq(t, "1", string(resp.ID))
+		resp := decodeResponse(t, out)
+		require.Equal(t, CodeInvalidRequest, resp.Error().Code)
+		require.JSONEq(t, "1", string(resp.ID()))
 	})
 }
 

@@ -107,16 +107,16 @@ func (s *Server) Register[P, R any](name string, fn TypedHandler[P, R], mw ...Mi
 // Serve dispatches a single request, returning nil for a notification — the
 // handler still runs, but no reply is produced. Panics in handlers are not
 // recovered; wrap Serve if your transport needs that.
-func (s *Server) Serve(ctx context.Context, req *Request) *Response {
+func (s *Server) Serve(ctx context.Context, req *Request) Response {
 	// Validate the ID first so later error responses never echo an invalid ID.
 	if !req.IsNotification() && !isValidID(req.ID) {
-		return errorResponse(nil, NewError(CodeInvalidRequest, "id must be a string, number, or null"))
+		return NewErrorResponse(NewError(CodeInvalidRequest, "id must be a string, number, or null"), nil)
 	}
 	if req.JSONRPC != Version {
-		return errorResponse(req.ID, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`))
+		return NewErrorResponse(NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`), req.ID)
 	}
 	if req.Method == "" {
-		return errorResponse(req.ID, NewError(CodeInvalidRequest, "missing method"))
+		return NewErrorResponse(NewError(CodeInvalidRequest, "missing method"), req.ID)
 	}
 
 	s.mu.RLock()
@@ -128,7 +128,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		if req.IsNotification() {
 			return nil
 		}
-		return errorResponse(req.ID, NewError(CodeMethodNotFound, "method not found: "+req.Method))
+		return NewErrorResponse(NewError(CodeMethodNotFound, "method not found: "+req.Method), req.ID)
 	}
 
 	result, rpcErr := h(ctx, req.Params)
@@ -136,14 +136,11 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		return nil
 	}
 	if rpcErr != nil {
-		return errorResponse(req.ID, rpcErr)
+		return NewErrorResponse(rpcErr, req.ID)
 	}
-	// A success response must carry a result member; omitempty would drop a
-	// nil one, so encode it as JSON null.
-	if len(result) == 0 {
-		result = jsontext.Value("null")
-	}
-	return &Response{JSONRPC: Version, Result: result, ID: req.ID}
+	// A nil result becomes JSON null in NewSuccessResponse: the spec requires
+	// the member to be present on every success response.
+	return NewSuccessResponse(result, req.ID)
 }
 
 // ServeMessage parses data as a JSON-RPC message, dispatches it via Serve,
@@ -167,7 +164,9 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	}
 	var req Request
 	if err := s.decode(data, &req); err != nil {
-		return json.Marshal(errorResponse(recoveredID(&req), classifyDecodeError(err)))
+		return json.Marshal(
+			NewErrorResponse(classifyDecodeError(err), recoveredID(&req)),
+		)
 	}
 	resp := s.Serve(ctx, &req)
 	if resp == nil {
@@ -188,11 +187,11 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	if len(elems) == 0 {
 		return marshalMessageError(NewError(CodeInvalidRequest, "empty batch"))
 	}
-	responses := make([]*Response, 0, len(elems))
+	responses := make([]Response, 0, len(elems))
 	for _, elem := range elems {
 		var req Request
 		if err := s.decode(elem, &req); err != nil {
-			responses = append(responses, errorResponse(recoveredID(&req), classifyDecodeError(err)))
+			responses = append(responses, NewErrorResponse(classifyDecodeError(err), recoveredID(&req)))
 			continue
 		}
 		if resp := s.Serve(ctx, &req); resp != nil {
@@ -338,13 +337,6 @@ func classifyDecodeError(err error) *Error {
 	return NewError(CodeInvalidRequest, err.Error())
 }
 
-func errorResponse(id jsontext.Value, e *Error) *Response {
-	if len(id) == 0 {
-		id = jsontext.Value("null")
-	}
-	return &Response{JSONRPC: Version, Error: e, ID: id}
-}
-
 // recoveredID returns the id a failed decode managed to read, or nil when
 // there is none to trust. The spec requires a null id only when the id could
 // not be detected, so echoing a detected one lets the client correlate.
@@ -366,9 +358,5 @@ func isValidID(id jsontext.Value) bool {
 }
 
 func marshalMessageError(e *Error) (jsontext.Value, error) {
-	return json.Marshal(&Response{
-		JSONRPC: Version,
-		Error:   e,
-		ID:      jsontext.Value("null"),
-	})
+	return json.Marshal(NewErrorResponse(e, nil))
 }

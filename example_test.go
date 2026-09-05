@@ -67,8 +67,8 @@ func ExampleClient_Send() {
 		fmt.Println("transport error:", err)
 		return
 	}
-	if resp.Error != nil {
-		fmt.Println("rpc error:", resp.Error)
+	if resp.IsError() {
+		fmt.Println("rpc error:", resp.Error())
 		return
 	}
 	var greeting string

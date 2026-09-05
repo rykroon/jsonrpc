@@ -2,7 +2,7 @@ package jsonrpchttp_test
 
 import (
 	"context"
-	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,7 +46,7 @@ func TestHandlerRoundTrip(t *testing.T) {
 	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", params, jsonrpc.NewID(1)))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Nil(t, resp.Error)
+	require.False(t, resp.IsError())
 
 	var result int
 	require.NoError(t, resp.Decode(&result))
@@ -87,8 +87,8 @@ func TestHandlerReturnsMethodNotFound(t *testing.T) {
 	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("missing", nil, jsonrpc.NewID("x")))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.NotNil(t, resp.Error)
-	assert.Equal(t, jsonrpc.CodeMethodNotFound, resp.Error.Code)
+	require.True(t, resp.IsError())
+	assert.Equal(t, jsonrpc.CodeMethodNotFound, resp.Error().Code)
 }
 
 func TestHandlerParseError(t *testing.T) {
@@ -144,11 +144,13 @@ func TestHandlerBatchRoundTrip(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var resps []jsonrpc.Response
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&resps))
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	resps, err := jsonrpc.DecodeResponses(body)
+	require.NoError(t, err)
 	require.Len(t, resps, 2)
-	assert.JSONEq(t, "2", string(resps[0].Result))
-	assert.JSONEq(t, "11", string(resps[1].Result))
+	assert.JSONEq(t, "2", string(resps[0].Result()))
+	assert.JSONEq(t, "11", string(resps[1].Result()))
 }
 
 func TestHandlerBatchAllNotificationsReturns204(t *testing.T) {

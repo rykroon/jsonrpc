@@ -27,7 +27,7 @@ type Sender struct {
 }
 
 // Send implements jsonrpc.Sender.
-func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Response, error) {
+func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (jsonrpc.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("jsonrpchttp: marshal request: %w", err)
@@ -72,9 +72,9 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Respo
 	if err != nil {
 		return nil, fmt.Errorf("jsonrpchttp: read response: %w", err)
 	}
-	var jr jsonrpc.Response
-	if err := json.Unmarshal(data, &jr); err != nil {
-		return nil, fmt.Errorf("jsonrpchttp: decode response: %w", err)
+	rpcResp, err := jsonrpc.DecodeResponse(data)
+	if err != nil {
+		return nil, fmt.Errorf("jsonrpchttp: %w", err)
 	}
-	return &jr, nil
+	return rpcResp, nil
 }

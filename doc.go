@@ -6,7 +6,7 @@
 //
 //   - Server.Register installs a typed function under a method name.
 //   - Server.RegisterHandler installs a raw Handler under a method name.
-//   - Server.Serve(ctx, *Request) *Response dispatches a single decoded
+//   - Server.Serve(ctx, *Request) Response dispatches a single decoded
 //     Request; returns nil for notifications.
 //
 // Cross-cutting concerns (auth, logging, validation) are added as Middleware
@@ -62,14 +62,35 @@
 // server-reported errors as *Error; Notify sends a notification. For full
 // control, build a Request with NewRequest or NewNotification (with NewID
 // and NewParams for the polymorphic fields), round-trip it with
-// Client.Send, then check Response.Error and decode Response.Result with
+// Client.Send, then check Response.IsError and decode the result with
 // Response.Decode.
+//
+// # Responses
+//
+// Response is an interface with exactly two implementations, matching the
+// two shapes the spec allows: *SuccessResponse carries a result and
+// *ErrorResponse carries an error object. Serve returns one of them (or
+// nil for a notification), and the interface's accessors — Result, Error,
+// ID, IsSuccess, IsError, Decode — let callers work with either without a
+// type switch.
+//
+// Both concrete types keep their fields unexported and write themselves to
+// the wire with MarshalJSONTo, so a response can only be built by
+// NewSuccessResponse, NewErrorResponse, or DecodeResponse. The spec's
+// invariants — a result member on every success, an id member on both —
+// therefore hold by construction, and a response that somehow lacks one
+// fails to marshal rather than reaching the wire malformed.
+//
+// Because Response is an interface it cannot be unmarshaled into.
+// DecodeResponse turns one response object into the right concrete type,
+// and DecodeResponses does the same for a batch reply; a transport
+// implementing Sender uses them to parse what comes back off the wire.
 //
 // # Polymorphic fields
 //
 // Request.Params, Request.ID, Response.Result, and Error.Data are stored
-// as jsontext.Value because the spec leaves their types open. Decode
-// them into concrete types at the point of use; the typed helpers
+// as jsontext.Value because the spec leaves their types open. Decode them
+// into concrete types at the point of use; the typed helpers
 // (Server.Register, Typed, DecodeParams) do this for you.
 //
 // # Not included

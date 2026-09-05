@@ -21,25 +21,6 @@ func (r *Request) IsNotification() bool {
 	return len(r.ID) == 0
 }
 
-// Response is a JSON-RPC 2.0 response; exactly one of Result or Error is set.
-// ID is always present, and is JSON null when the request ID could not be
-// determined.
-type Response struct {
-	JSONRPC string         `json:"jsonrpc"`
-	Result  jsontext.Value `json:"result,omitzero"`
-	Error   *Error         `json:"error,omitempty"`
-	ID      jsontext.Value `json:"id"`
-}
-
-// Decode unmarshals r.Result into into, doing nothing when into is nil or
-// Result is empty. Check r.Error first.
-func (r *Response) Decode(into any) error {
-	if into == nil || len(r.Result) == 0 {
-		return nil
-	}
-	return json.Unmarshal(r.Result, into)
-}
-
 // NewRequest assembles a Request. Params and id are raw JSON — build them
 // with NewParams and NewID. For a notification, use NewNotification.
 func NewRequest(method string, params, id jsontext.Value) *Request {

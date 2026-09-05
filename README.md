@@ -80,7 +80,14 @@ middleware.
   a `*Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
   requests without touching `jsontext.Value` directly.
-- `Response.Decode` — unmarshal a successful result into a target.
+- `Response` — an interface over the spec's two response shapes,
+  `*SuccessResponse` and `*ErrorResponse`. `Result`, `Error`, `ID`,
+  `IsSuccess`, `IsError`, and `Decode` work on either; `Decode` unmarshals a
+  successful result into a target. Both types are constructor-only, so the
+  spec's invariants hold by construction.
+- `DecodeResponse` / `DecodeResponses` — parse a response (or a batch reply)
+  off the wire into the right concrete type; what a `Sender` implementation
+  needs, since `Response` is an interface.
 - `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream). Handles batch
   messages (JSON arrays) per the spec.
