@@ -1,6 +1,7 @@
 package jsonrpc_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
@@ -136,15 +137,22 @@ func ExampleServer_SetRequestDecoder() {
 	}
 
 	s := jsonrpc.NewServer()
-	s.SetRequestDecoder(func(data jsontext.Value, req *jsonrpc.Request) error {
-		err := jsonrpc.DecodeRequest(data, req)
+	s.SetRequestDecoder(func(d *jsontext.Decoder, req *jsonrpc.Request) error {
+		// One ReadValue consumes the decoder's one value and hands back the
+		// raw message, which the error below quotes.
+		raw, err := d.ReadValue()
+		if err != nil {
+			return err
+		}
+		raw = raw.Clone()
+		err = jsonrpc.DecodeRequest(jsontext.NewDecoder(bytes.NewReader(raw)), req)
 		e, ok := errors.AsType[*jsonrpc.Error](err)
 		if !ok {
 			// Not a classified error: let the server classify it.
 			return err
 		}
 		// Returning an *Error hands the client exactly this object.
-		return jsonrpc.NewError(e.Code, e.Message).MustSetData(errorData{Got: string(data)})
+		return jsonrpc.NewError(e.Code, e.Message).MustSetData(errorData{Got: string(raw)})
 	})
 	s.Register("add", func(_ context.Context, p struct {
 		A, B int

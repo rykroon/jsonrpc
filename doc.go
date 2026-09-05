@@ -30,10 +30,12 @@
 //
 // # Decoding
 //
-// Turning bytes into a Request is a seam: a RequestDecoder. The package
-// default, DecodeRequest, walks the message token by token so that every
-// rejection carries a message this package wrote rather than one from the
-// JSON library. It is strict — duplicate object member names anywhere and
+// Turning a message into a Request is a seam: a RequestDecoder, which is
+// func(*jsontext.Decoder, *Request) error — json.UnmarshalFromFunc's
+// signature, so a decoder works on either side. The package default,
+// DecodeRequest, walks the message token by token so that every rejection
+// carries a message this package wrote rather than one from the JSON
+// library. It is strict — duplicate object member names anywhere and
 // unknown members on the request envelope are rejected as Invalid Request
 // (unknown members inside params are tolerated), and per the spec params
 // must be a structured value whenever the member is present, so a typed
@@ -46,6 +48,12 @@
 // envelope: returning an *Error from a decoder surfaces it verbatim, while
 // any other error is classified as a Parse error or an Invalid Request. A
 // custom decoder can delegate to DecodeRequest and adjust the result.
+//
+// A custom decoder is installed as json/v2's unmarshaler for a *Request, so
+// it reads exactly one JSON value from the decoder it is handed — one that
+// ignores the message still calls SkipValue — and json/v2 rejects anything
+// following that value. Trailing data is therefore not a rule a custom
+// decoder can forget.
 //
 // Whatever the decoder does, Serve independently validates every Request it
 // dispatches — the id shape, the "2.0" version, and a non-empty method —

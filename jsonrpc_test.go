@@ -1,6 +1,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	jsonv1 "encoding/json"
 	"encoding/json/jsontext"
@@ -1038,7 +1039,7 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 	t.Run("bespoke *Error surfaces verbatim", func(t *testing.T) {
 		s := NewServer()
-		s.SetRequestDecoder(func(jsontext.Value, *Request) error { return custom })
+		s.SetRequestDecoder(func(*jsontext.Decoder, *Request) error { return custom })
 		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
 			return addResult{Sum: p.A + p.B}, nil
 		})
@@ -1058,7 +1059,7 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 	t.Run("wrapped *Error is unwrapped", func(t *testing.T) {
 		s := NewServer()
-		s.SetRequestDecoder(func(jsontext.Value, *Request) error {
+		s.SetRequestDecoder(func(*jsontext.Decoder, *Request) error {
 			return fmt.Errorf("decoding envelope: %w", custom)
 		})
 
@@ -1071,7 +1072,7 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 	t.Run("plain error is classified as Invalid Request", func(t *testing.T) {
 		s := NewServer()
-		s.SetRequestDecoder(func(jsontext.Value, *Request) error { return errors.New("nope") })
+		s.SetRequestDecoder(func(*jsontext.Decoder, *Request) error { return errors.New("nope") })
 
 		code, message, _ := decodeError(t, s, `{}`)
 		require.Equal(t, CodeInvalidRequest, code)
@@ -1080,7 +1081,7 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 
 	t.Run("typed-nil *Error does not read as success", func(t *testing.T) {
 		s := NewServer()
-		s.SetRequestDecoder(func(jsontext.Value, *Request) error {
+		s.SetRequestDecoder(func(*jsontext.Decoder, *Request) error {
 			var e *Error
 			return fmt.Errorf("wrapped: %w", e)
 		})
@@ -1093,8 +1094,16 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 	// A decoder that delegates to DecodeRequest but relaxes one of its rules:
 	// unknown envelope members are dropped instead of rejected.
-	lenient := func(data jsontext.Value, req *Request) error {
-		if err := DecodeRequest(data, req); err != nil {
+	lenient := func(d *jsontext.Decoder, req *Request) error {
+		// One ReadValue satisfies the decoder's one-value contract; the
+		// bytes are then replayed through DecodeRequest as many times as
+		// this decoder needs.
+		data, err := d.ReadValue()
+		if err != nil {
+			return err
+		}
+		data = data.Clone()
+		if err := DecodeRequest(jsontext.NewDecoder(bytes.NewReader(data)), req); err != nil {
 			var stripped map[string]jsontext.Value
 			if json.Unmarshal(data, &stripped) != nil {
 				return err
@@ -1110,7 +1119,7 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 			if mErr != nil {
 				return err
 			}
-			return DecodeRequest(clean, req)
+			return DecodeRequest(jsontext.NewDecoder(bytes.NewReader(clean)), req)
 		}
 		return nil
 	}
@@ -1148,7 +1157,11 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 		// Even a decoder that accepts anything cannot smuggle a bad version
 		// past Serve, which validates every Request however it was built.
 		s := NewServer()
-		s.SetRequestDecoder(func(_ jsontext.Value, req *Request) error {
+		s.SetRequestDecoder(func(d *jsontext.Decoder, req *Request) error {
+			// Ignoring the message still means consuming its one value.
+			if err := d.SkipValue(); err != nil {
+				return err
+			}
 			req.JSONRPC, req.Method, req.ID = "1.0", "add", jsontext.Value("1")
 			return nil
 		})
@@ -1157,6 +1170,31 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 		resp := decodeResponse(t, out)
 		require.Equal(t, CodeInvalidRequest, resp.Error().Code)
 		require.JSONEq(t, "1", string(resp.ID()))
+	})
+
+	t.Run("server owns the framing", func(t *testing.T) {
+		// A decoder that never delegates to DecodeRequest still cannot let
+		// trailing data through: the server checks that nothing follows the
+		// one value the decoder consumed.
+		s := NewServer()
+		s.SetRequestDecoder(func(d *jsontext.Decoder, req *Request) error {
+			val, err := d.ReadValue()
+			if err != nil {
+				return err
+			}
+			return json.Unmarshal(val, req)
+		})
+		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+			return addResult{Sum: p.A + p.B}, nil
+		})
+
+		msg := `{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`
+		out, err := s.ServeMessage(context.Background(), []byte(msg))
+		require.NoError(t, err)
+		require.JSONEq(t, `{"sum":3}`, string(decodeResponse(t, out).Result()))
+
+		code, _, _ := decodeError(t, s, msg+" !")
+		require.Equal(t, CodeParseError, code)
 	})
 }
 
@@ -1169,7 +1207,7 @@ func TestSetRequestDecoderPanics(t *testing.T) {
 	t.Run("after a method is registered", func(t *testing.T) {
 		s := newTestServer(t)
 		require.Panics(t, func() {
-			s.SetRequestDecoder(func(jsontext.Value, *Request) error { return nil })
+			s.SetRequestDecoder(func(*jsontext.Decoder, *Request) error { return nil })
 		})
 	})
 }

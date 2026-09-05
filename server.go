@@ -1,13 +1,11 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"sync"
 )
 
@@ -25,9 +23,16 @@ type TypedHandler[P, R any] func(context.Context, P) (R, error)
 // middleware in a chain is the outermost layer.
 type Middleware func(next Handler) Handler
 
-// RequestDecoder is the seam ServeMessage uses to turn bytes into a Request.
-// Batch splitting happens above it, so a decoder always sees exactly one
-// request object.
+// RequestDecoder is the seam ServeMessage uses to turn a message into a
+// Request. Batch splitting happens above it, so a decoder always sees exactly
+// one request object.
+//
+// The signature is json.UnmarshalFromFunc's, and the server installs a
+// decoder as exactly that: the unmarshaler json/v2 uses for a *Request. So a
+// decoder must read exactly one JSON value from d, the contract json/v2
+// states for UnmarshalerFrom — one that ignores the input still calls
+// d.SkipValue — and in return it inherits that machinery, including the
+// rejection of anything following the request object.
 //
 // Returning an *Error surfaces it to the client verbatim, giving the decoder
 // full control of the code, message, and Data. Any other error is classified
@@ -36,7 +41,7 @@ type Middleware func(next Handler) Handler
 //
 // DecodeRequest is the package default; install another with
 // Server.SetRequestDecoder.
-type RequestDecoder func(data jsontext.Value, req *Request) error
+type RequestDecoder func(d *jsontext.Decoder, req *Request) error
 
 // chain wraps h with mw, applying mw[0] outermost.
 func chain(h Handler, mw []Middleware) Handler {
@@ -51,11 +56,23 @@ type Server struct {
 	mu         sync.RWMutex
 	methods    map[string]Handler
 	middleware []Middleware
-	decoder    RequestDecoder
+	// opts carries the RequestDecoder, as json/v2's unmarshaler for a
+	// *Request; there is no separate copy of the decoder to keep in sync.
+	opts json.Options
 }
 
 func NewServer() *Server {
-	return &Server{methods: map[string]Handler{}, decoder: DecodeRequest}
+	return &Server{
+		methods: map[string]Handler{},
+		opts:    decodeOptions(DecodeRequest),
+	}
+}
+
+// decodeOptions hands d to json/v2 as the unmarshaler for *Request. The
+// options are built once per decoder rather than per message, which keeps
+// their construction off the request path.
+func decodeOptions(d RequestDecoder) json.Options {
+	return json.WithUnmarshalers(json.UnmarshalFromFunc(d))
 }
 
 // Use appends server-wide middleware applied to every handler, outside any
@@ -83,7 +100,7 @@ func (s *Server) SetRequestDecoder(d RequestDecoder) {
 	if len(s.methods) > 0 {
 		panic("jsonrpc: SetRequestDecoder must be called before registering methods")
 	}
-	s.decoder = d
+	s.opts = decodeOptions(d)
 }
 
 // RegisterHandler installs h under name, wrapped with the per-method
@@ -204,12 +221,15 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	return json.Marshal(responses)
 }
 
-// decode runs the server's configured RequestDecoder.
+// decode runs the server's configured RequestDecoder over one message.
+// json/v2 drives the decoder, so the one-value contract and the rejection of
+// anything following that value are enforced by the same code that enforces
+// them for any other unmarshaler.
 func (s *Server) decode(data jsontext.Value, req *Request) error {
 	s.mu.RLock()
-	d := s.decoder
+	opts := s.opts
 	s.mu.RUnlock()
-	return d(data, req)
+	return json.Unmarshal(data, req, opts)
 }
 
 // DecodeRequest is the package's default RequestDecoder. It walks one request
@@ -227,9 +247,10 @@ func (s *Server) decode(data jsontext.Value, req *Request) error {
 // member. Required members are not checked here — Serve rejects a missing
 // method or wrong version on every path, including transports that build a
 // Request themselves.
-func DecodeRequest(data jsontext.Value, req *Request) error {
-	d := jsontext.NewDecoder(bytes.NewReader(data))
-
+//
+// It reads exactly one value from d, so a custom decoder can delegate to it
+// and adjust the result.
+func DecodeRequest(d *jsontext.Decoder, req *Request) error {
 	tok, err := d.ReadToken()
 	if err != nil {
 		return tokenError(err)
@@ -296,17 +317,10 @@ func DecodeRequest(data jsontext.Value, req *Request) error {
 		}
 	}
 
-	// Consume the closing brace, then require the message to end there: a
-	// Decoder reads a stream of top-level values, so a second one is trailing
-	// garbage rather than a second request.
+	// Consume the closing brace, completing the one value this decoder reads.
+	// Whether anything follows it is json/v2's check, not ours.
 	if _, err := d.ReadToken(); err != nil {
 		return tokenError(err)
-	}
-	if _, err := d.ReadToken(); !errors.Is(err, io.EOF) {
-		if err != nil {
-			return tokenError(err)
-		}
-		return NewError(CodeParseError, "unexpected data after top-level value")
 	}
 	return nil
 }
@@ -333,6 +347,12 @@ func classifyDecodeError(err error) *Error {
 	var syntaxErr *jsontext.SyntacticError
 	if errors.As(err, &syntaxErr) && !errors.Is(err, jsontext.ErrDuplicateName) {
 		return NewError(CodeParseError, err.Error())
+	}
+	// json/v2 wraps an unmarshaler's error in a *SemanticError naming the Go
+	// type it was decoding into. That framing is noise to a JSON-RPC client,
+	// so report what the decoder itself said.
+	if se, ok := errors.AsType[*json.SemanticError](err); ok && se.Err != nil {
+		err = se.Err
 	}
 	return NewError(CodeInvalidRequest, err.Error())
 }
