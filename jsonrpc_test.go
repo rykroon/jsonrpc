@@ -44,8 +44,7 @@ func mustParams(t *testing.T, v any) jsontext.Value {
 	return p
 }
 
-// decodeResponse parses one marshaled response off the wire, checking the
-// invariants DecodeResponse enforces along the way.
+// decodeResponse parses one marshaled response off the wire.
 func decodeResponse(t *testing.T, data jsontext.Value) *Response {
 	t.Helper()
 	resp, err := DecodeResponse(data)
@@ -323,9 +322,8 @@ func TestResponseMarshalsExactShape(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","result":{"sum":3},"id":1}`, string(v1))
 }
 
-// A Response written by hand can hold a shape the spec forbids. The canonical
-// marshaler reports it rather than emitting it, and WriteValue rejects a
-// malformed raw result the same way.
+// A hand-built Response can hold a shape the spec forbids. Marshaling reports
+// it rather than emitting it, and rejects a malformed raw result the same way.
 func TestResponseMarshalRejectsInvalidShape(t *testing.T) {
 	_, err := json.Marshal(&Response{ID: NewID(1)})
 	require.ErrorContains(t, err, "neither result nor error", "a response must carry one of the two")
@@ -340,13 +338,13 @@ func TestResponseMarshalRejectsInvalidShape(t *testing.T) {
 	_, err = json.Marshal(&Response{Result: jsontext.Value(`{oops`), ID: NewID(1)})
 	require.Error(t, err, "a malformed result must not reach the wire")
 
-	// An empty id is not a malformed response: the spec's own fallback is null.
+	// An empty id is not malformed: the spec's own fallback is null.
 	b, err := json.Marshal(&Response{Result: jsontext.Value("1")})
 	require.NoError(t, err)
 	require.Equal(t, `{"jsonrpc":"2.0","result":1,"id":null}`, string(b))
 
-	// Nor is a version the caller never set: the marshaler writes the
-	// protocol's, not the field's.
+	// Nor is a version the caller never set: the protocol's is written, not the
+	// field's.
 	b, err = json.Marshal(&Response{Result: jsontext.Value("1"), ID: NewID(1)})
 	require.NoError(t, err)
 	require.Equal(t, `{"jsonrpc":"2.0","result":1,"id":1}`, string(b))
@@ -436,9 +434,8 @@ func TestDecodeResponsesRejectsBadElement(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A Sender is free to build a Response itself, so Call must not read a shape
-// the spec forbids — neither result nor error — as a success with nothing to
-// decode.
+// A Sender may build a Response itself, so Call must not read a response with
+// neither member as a success with nothing to decode.
 func TestClientCallResponseWithNeitherMember(t *testing.T) {
 	c := NewClient(SenderFunc(func(_ context.Context, req *Request) (*Response, error) {
 		return &Response{JSONRPC: Version, ID: req.ID}, nil
@@ -1115,18 +1112,18 @@ func TestSetRequestDecoderErrorPassThrough(t *testing.T) {
 }
 
 func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
-	// A decoder that delegates to DecodeRequest but relaxes one of its rules:
+	// A decoder that delegates to the default but relaxes one of its rules:
 	// unknown envelope members are dropped instead of rejected.
 	lenient := func(d *jsontext.Decoder, req *Request) error {
 		// One ReadValue satisfies the decoder's one-value contract; the
-		// bytes are then replayed through DecodeRequest as many times as
+		// bytes are then replayed through the default as many times as
 		// this decoder needs.
 		data, err := d.ReadValue()
 		if err != nil {
 			return err
 		}
 		data = data.Clone()
-		if err := DecodeRequest(jsontext.NewDecoder(bytes.NewReader(data)), req); err != nil {
+		if err := req.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(data))); err != nil {
 			var stripped map[string]jsontext.Value
 			if json.Unmarshal(data, &stripped) != nil {
 				return err
@@ -1142,7 +1139,7 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 			if mErr != nil {
 				return err
 			}
-			return DecodeRequest(jsontext.NewDecoder(bytes.NewReader(clean)), req)
+			return req.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(clean)))
 		}
 		return nil
 	}
@@ -1196,7 +1193,7 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 	})
 
 	t.Run("server owns the framing", func(t *testing.T) {
-		// A decoder that never delegates to DecodeRequest still cannot let
+		// A decoder that never delegates to the default still cannot let
 		// trailing data through: the server checks that nothing follows the
 		// one value the decoder consumed.
 		s := NewServer()
@@ -1221,6 +1218,83 @@ func TestSetRequestDecoderReplacesBehavior(t *testing.T) {
 	})
 }
 
+// The strict envelope check is Request's own wire form, so it applies to any
+// unmarshal, not only the ones a Server drives.
+func TestRequestDecodesItself(t *testing.T) {
+	t.Run("plain json.Unmarshal is strict", func(t *testing.T) {
+		var req Request
+		err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`), &req)
+		require.ErrorContains(t, err, "unknown member: surprise")
+
+		e, ok := errors.AsType[*Error](err)
+		require.True(t, ok, "the *Error survives json/v2's wrapping")
+		require.Equal(t, CodeInvalidRequest, e.Code)
+	})
+
+	t.Run("params must be structured", func(t *testing.T) {
+		var req Request
+		err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"add","params":null,"id":1}`), &req)
+		require.ErrorContains(t, err, "params must be an object or array")
+	})
+
+	t.Run("a good request decodes", func(t *testing.T) {
+		var req Request
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1},"id":1}`), &req))
+		require.Equal(t, "add", req.Method)
+		require.JSONEq(t, `{"a":1}`, string(req.Params))
+		require.JSONEq(t, "1", string(req.ID))
+	})
+
+	// v1 is implemented over v2 in Go 1.27, so it honors the method too.
+	t.Run("under encoding/json v1", func(t *testing.T) {
+		var req Request
+		err := jsonv1.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`), &req)
+		require.ErrorContains(t, err, "unknown member: surprise")
+	})
+}
+
+// An unmarshaler or marshaler in the options outranks a method, so SetOptions
+// alone takes over either wire form.
+func TestSetOptionsOverridesTheTypesOwnForm(t *testing.T) {
+	t.Run("a *Request unmarshaler replaces the default", func(t *testing.T) {
+		s := NewServer()
+		// A decoder that tolerates the unknown member the default rejects.
+		s.SetOptions(json.WithUnmarshalers(json.UnmarshalFromFunc(
+			func(d *jsontext.Decoder, req *Request) error {
+				var raw map[string]jsontext.Value
+				if err := json.UnmarshalDecode(d, &raw); err != nil {
+					return err
+				}
+				req.JSONRPC, req.Method = Version, "add"
+				req.Params, req.ID = raw["params"], raw["id"]
+				return nil
+			},
+		)))
+		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+			return addResult{Sum: p.A + p.B}, nil
+		})
+
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"surprise":true,"id":1}`))
+		require.NoError(t, err)
+		require.JSONEq(t, `{"jsonrpc":"2.0","result":{"sum":3},"id":1}`, string(out))
+	})
+
+	t.Run("a *Response marshaler replaces the default", func(t *testing.T) {
+		s := NewServer()
+		s.SetOptions(json.WithMarshalers(json.MarshalToFunc(stampEncoder)))
+		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+			return addResult{Sum: p.A + p.B}, nil
+		})
+
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`))
+		require.NoError(t, err)
+		require.JSONEq(t, `{"jsonrpc":"2.0","result":{"sum":3},"id":1,"served_by":"test"}`, string(out))
+	})
+}
+
 func TestSetRequestDecoderPanics(t *testing.T) {
 	t.Run("nil decoder", func(t *testing.T) {
 		s := NewServer()
@@ -1235,8 +1309,7 @@ func TestSetRequestDecoderPanics(t *testing.T) {
 	})
 }
 
-// stampEncoder is a ResponseEncoder that writes its own envelope: the canonical
-// members plus one the spec never defines.
+// stampEncoder writes the canonical members plus one the spec never defines.
 func stampEncoder(enc *jsontext.Encoder, resp *Response) error {
 	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
 		return err
@@ -1310,14 +1383,14 @@ func TestSetResponseEncoderReplacesBehavior(t *testing.T) {
 	})
 }
 
-// An encoder that delegates to EncodeResponse leaves the wire form untouched,
-// so wrapping the default costs nothing.
+// An encoder that delegates to the default leaves the wire form untouched, so
+// wrapping it costs nothing.
 func TestSetResponseEncoderDelegates(t *testing.T) {
 	var ran int
 	s := NewServer()
 	s.SetResponseEncoder(func(enc *jsontext.Encoder, resp *Response) error {
 		ran++
-		return EncodeResponse(enc, resp)
+		return resp.MarshalJSONTo(enc)
 	})
 	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
 		return addResult{Sum: p.A + p.B}, nil
@@ -1337,7 +1410,7 @@ func TestSetResponseEncoderDelegates(t *testing.T) {
 	require.Equal(t, 1, ran)
 }
 
-// There is no response left to report an encoder failure in, so it surfaces as
+// An encoder failure has no response left to report it in, so it surfaces as
 // ServeMessage's error return.
 func TestSetResponseEncoderErrorSurfaces(t *testing.T) {
 	s := NewServer()
@@ -1504,7 +1577,7 @@ func TestSetOptionsPreservesRequestDecoder(t *testing.T) {
 	tracingDecoder := func(ran *bool) RequestDecoder {
 		return func(d *jsontext.Decoder, req *Request) error {
 			*ran = true
-			return DecodeRequest(d, req)
+			return req.UnmarshalJSONFrom(d)
 		}
 	}
 

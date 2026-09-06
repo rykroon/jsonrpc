@@ -12,10 +12,8 @@ import (
 // determined. Result stays raw because the spec leaves its type open; decode it
 // with Decode.
 //
-// A Response writes itself with MarshalJSONTo, so the spec's invariants are
-// enforced where they matter — a malformed response fails to marshal rather
-// than reaching the wire. The struct tags describe the same shape for the
-// decode side.
+// MarshalJSONTo writes it, so a response the spec forbids fails to marshal
+// rather than reaching the wire; the struct tags serve the decode side.
 type Response struct {
 	JSONRPC string         `json:"jsonrpc"`
 	Result  jsontext.Value `json:"result,omitzero"`
@@ -55,22 +53,16 @@ func (r Response) Decode(into any) error {
 	return json.Unmarshal(r.Result, into)
 }
 
-// MarshalJSONTo writes the response in canonical form via EncodeResponse. It is
-// a Response's own wire form, used by both json packages; a Server writes
-// responses with its ResponseEncoder instead.
-func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return EncodeResponse(enc, &r)
-}
-
-// EncodeResponse is the package's default ResponseEncoder. It writes the
-// response as tokens rather than through the struct tags, so the shape is the
-// spec's regardless of what the fields hold: the version is always Version, the
-// members are ordered, and an empty id is written as JSON null.
+// MarshalJSONTo writes the response as tokens rather than through the struct
+// tags, so the shape is the spec's regardless of what the fields hold: the
+// version is always Version, the members are ordered, and an empty id is
+// written as JSON null. A Server's ResponseEncoder overrides this, and can
+// delegate here.
 //
 // Exactly one of Result and Error must be set — a response with both or with
 // neither is a bug, and is reported here instead of being sent. WriteValue
 // likewise rejects a malformed raw result.
-func EncodeResponse(enc *jsontext.Encoder, r *Response) error {
+func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 	switch {
 	case r.Error != nil && len(r.Result) > 0:
 		return errors.New("jsonrpc: response has both result and error")

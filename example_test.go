@@ -143,7 +143,7 @@ func ExampleServer_SetRequestDecoder() {
 			return err
 		}
 		raw = raw.Clone()
-		err = jsonrpc.DecodeRequest(jsontext.NewDecoder(bytes.NewReader(raw)), req)
+		err = req.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(raw)))
 		e, ok := errors.AsType[*jsonrpc.Error](err)
 		if !ok {
 			// Not a classified error: let the server classify it.
@@ -164,10 +164,9 @@ func ExampleServer_SetRequestDecoder() {
 	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"unknown member: surprise","data":{"got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
 }
 
-// ExampleServer_SetResponseEncoder replaces the response encoder to control the
-// wire form of every response the server sends. This one writes the canonical
-// members and stamps each response with a non-standard one; an encoder that
-// only wants to observe responses delegates to jsonrpc.EncodeResponse instead.
+// ExampleServer_SetResponseEncoder controls the wire form of every response the
+// server sends. This one stamps each with a non-standard member; an encoder
+// that only wants to observe them delegates to Response.MarshalJSONTo.
 func ExampleServer_SetResponseEncoder() {
 	s := jsonrpc.NewServer()
 	s.SetResponseEncoder(func(e *jsontext.Encoder, resp *jsonrpc.Response) error {

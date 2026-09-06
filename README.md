@@ -125,19 +125,23 @@ as an Internal error carrying the error's message.
 - `Server.SetOptions` — install json/v2 options (e.g. `json.WithMarshalers`,
   `json.WithUnmarshalers`) that control how every method's params are
   decoded and results encoded
-- `Server.SetRequestDecoder` — swap the request decoder to control the
-  errors reported for a malformed envelope
-- `Server.SetResponseEncoder` — swap the response encoder to control the
-  wire form of every response the server sends; the default,
-  `EncodeResponse`, writes the canonical object and refuses a response
-  holding both a result and an error, or neither
+- `Server.SetRequestDecoder` / `Server.SetResponseEncoder` — override the
+  wire form of the envelope in either direction: the errors reported for a
+  malformed request, or the shape of every response sent. Each is shorthand
+  for the json/v2 option that installs the same function, and outranks it.
+  Absent them, `Request` and `Response` decode and encode themselves with
+  `UnmarshalJSONFrom` and `MarshalJSONTo`.
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
   requests without touching `jsontext.Value` directly.
+- `Request` — a plain struct with `Params` and `ID` kept as raw JSON. It
+  decodes itself with `UnmarshalJSONFrom`, so the strict envelope check applies
+  to any `json.Unmarshal` into one, not only the ones a `Server` drives.
 - `Response` — one struct for both shapes the spec allows: exactly one of
   `Result` and `Error` is set, and `ID` is always present. `resp.Error != nil`
   tells the two apart, and `Decode` unmarshals a successful result into a
   target. `NewSuccessResponse` / `NewErrorResponse` normalize an empty result
-  or id to JSON null.
+  or id to JSON null, and it writes itself in canonical form with
+  `MarshalJSONTo`.
 - `DecodeResponse` / `DecodeResponses` — parse a response (or a batch reply)
   off the wire, checking the spec's invariants; what a `Sender` implementation
   reaches for.

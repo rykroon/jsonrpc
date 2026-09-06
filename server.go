@@ -63,12 +63,12 @@ func DefaultErrorHandler(_ context.Context, _ *Request, err error) *Error {
 	return NewError(CodeInternalError, err.Error())
 }
 
-// RequestDecoder is the seam ServeMessage uses to turn a message into a
-// Request. Batch splitting happens above it, so a decoder always sees exactly
-// one request object.
+// RequestDecoder overrides Request.UnmarshalJSONFrom for one server, and can
+// delegate to it. Batch splitting happens above it, so a decoder always sees
+// exactly one request object.
 //
-// The signature is json.UnmarshalFromFunc's, and the server installs a decoder
-// as exactly that: json/v2's unmarshaler for a *Request. A decoder must
+// The signature is json.UnmarshalFromFunc's, and SetRequestDecoder installs a
+// decoder as exactly that: json/v2's unmarshaler for a *Request. A decoder must
 // therefore read exactly one JSON value from d — one that ignores the input
 // still calls d.SkipValue — and in return inherits json/v2's machinery,
 // including the rejection of trailing data.
@@ -76,25 +76,15 @@ func DefaultErrorHandler(_ context.Context, _ *Request, err error) *Error {
 // Returning an *Error gives the decoder full control of the code, message, and
 // Data. Any other error is classified by the server: malformed JSON as a Parse
 // error, everything else as an Invalid Request.
-//
-// DecodeRequest is the package default; install another with
-// Server.SetRequestDecoder.
 type RequestDecoder func(d *jsontext.Decoder, req *Request) error
 
-// ResponseEncoder is the seam the server uses to write a Response, and the
-// counterpart to RequestDecoder: it decides the wire form of every response the
-// server sends.
-//
-// The signature is json.MarshalToFunc's, and the server installs an encoder as
-// exactly that: json/v2's marshaler for a *Response. An encoder must therefore
-// write exactly one JSON value to enc, and in return inherits json/v2's
-// machinery, including the options the server was given.
+// ResponseEncoder is the counterpart to RequestDecoder: it overrides
+// Response.MarshalJSONTo for one server, deciding the wire form of every
+// response sent, and can delegate to it. The signature is json.MarshalToFunc's,
+// so an encoder must write exactly one JSON value to enc.
 //
 // An error from an encoder is not a JSON-RPC error — there is no response left
 // to report it in — so it surfaces as ServeMessage's error return.
-//
-// EncodeResponse is the package default; install another with
-// Server.SetResponseEncoder.
 type ResponseEncoder func(enc *jsontext.Encoder, resp *Response) error
 
 // chain wraps h with mw, applying mw[0] outermost.
@@ -111,12 +101,13 @@ type Server struct {
 	methods    map[string]RawHandler
 	middleware []Middleware
 	// decoder, encoder and userOpts are the inputs to opts, kept so any setter
-	// can rebuild it without disturbing the others.
+	// can rebuild it without disturbing the others. Nil means none was
+	// installed.
 	decoder      RequestDecoder
 	encoder      ResponseEncoder
 	errorHandler ErrorHandler
 	userOpts     json.Options
-	// opts is the single json.Options used for every JSON operation: the
+	// opts is the single json.Options used for every JSON operation: a
 	// RequestDecoder and ResponseEncoder ride in it as the unmarshaler for a
 	// *Request and the marshaler for a *Response, alongside whatever SetOptions
 	// installed.
@@ -126,8 +117,6 @@ type Server struct {
 func NewServer() *Server {
 	s := &Server{
 		methods:      map[string]RawHandler{},
-		decoder:      DecodeRequest,
-		encoder:      EncodeResponse,
 		errorHandler: DefaultErrorHandler,
 	}
 	s.rebuildOptions()
@@ -135,31 +124,34 @@ func NewServer() *Server {
 }
 
 // rebuildOptions derives opts from decoder, encoder and userOpts, keeping
-// construction off the request path. The caller holds mu.
+// construction off the request path. The caller holds mu. With neither
+// installed, opts is exactly what SetOptions was given, leaving Request and
+// Response to decode and encode themselves.
 //
-// json.JoinOptions lets a later WithUnmarshalers replace an earlier one, so the
-// user's unmarshalers are joined with the decoder's rather than layered over
-// it, and the same for marshalers. The package's functions come first, so for
-// *Request and *Response they always win.
+// json.JoinOptions lets a later WithUnmarshalers replace an earlier one, so a
+// decoder is joined with the user's unmarshalers rather than layered over them,
+// and the same for an encoder. The setter's function comes first, so it wins
+// for its type.
 func (s *Server) rebuildOptions() {
-	reqUnmarshaler := json.UnmarshalFromFunc(s.decoder)
-	respMarshaler := json.MarshalToFunc(s.encoder)
-	if s.userOpts == nil {
-		s.opts = json.JoinOptions(
-			json.WithUnmarshalers(reqUnmarshaler),
-			json.WithMarshalers(respMarshaler),
-		)
-		return
+	opts := []json.Options{}
+	if s.userOpts != nil {
+		opts = append(opts, s.userOpts)
 	}
-	us := reqUnmarshaler
-	if u, ok := json.GetOption(s.userOpts, json.WithUnmarshalers); ok && u != nil {
-		us = json.JoinUnmarshalers(reqUnmarshaler, u)
+	if s.decoder != nil {
+		us := json.UnmarshalFromFunc(s.decoder)
+		if u, ok := json.GetOption(s.userOpts, json.WithUnmarshalers); ok && u != nil {
+			us = json.JoinUnmarshalers(us, u)
+		}
+		opts = append(opts, json.WithUnmarshalers(us))
 	}
-	ms := respMarshaler
-	if m, ok := json.GetOption(s.userOpts, json.WithMarshalers); ok && m != nil {
-		ms = json.JoinMarshalers(respMarshaler, m)
+	if s.encoder != nil {
+		ms := json.MarshalToFunc(s.encoder)
+		if m, ok := json.GetOption(s.userOpts, json.WithMarshalers); ok && m != nil {
+			ms = json.JoinMarshalers(ms, m)
+		}
+		opts = append(opts, json.WithMarshalers(ms))
 	}
-	s.opts = json.JoinOptions(s.userOpts, json.WithUnmarshalers(us), json.WithMarshalers(ms))
+	s.opts = json.JoinOptions(opts...)
 }
 
 // Use appends server-wide middleware applied to every handler, outside any
@@ -184,8 +176,8 @@ func (s *Server) Use(mw ...Middleware) {
 // SetOptions panics once any method is registered. For per-method options,
 // adapt the handler with Raw and install it with RegisterRaw.
 //
-// The RequestDecoder always rides alongside these options as the unmarshaler
-// for *Request; replace it with SetRequestDecoder.
+// A RequestDecoder or ResponseEncoder rides in the same options, outranking
+// anything set here for *Request or *Response.
 func (s *Server) SetOptions(opts ...json.Options) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -196,14 +188,13 @@ func (s *Server) SetOptions(opts ...json.Options) {
 	s.rebuildOptions()
 }
 
-// SetRequestDecoder replaces the decoder ServeMessage uses to parse inbound
-// messages, taking control of the errors reported for a malformed envelope.
-// The default is DecodeRequest. Like Use, it panics once any method is
-// registered, or on a nil decoder.
+// SetRequestDecoder installs a decoder for inbound messages, taking control of
+// the errors reported for a malformed envelope. Absent one, a Request decodes
+// itself. Like Use, it panics once any method is registered, or on a nil
+// decoder.
 //
-// The decoder is installed as json/v2's unmarshaler for a *Request within the
-// options SetOptions manages, and outranks any unmarshaler for that type set
-// there.
+// Shorthand for SetOptions(json.WithUnmarshalers(json.UnmarshalFromFunc(d))),
+// except that the decoder outranks any *Request unmarshaler set there.
 func (s *Server) SetRequestDecoder(d RequestDecoder) {
 	if d == nil {
 		panic("jsonrpc: SetRequestDecoder requires a non-nil decoder")
@@ -217,13 +208,12 @@ func (s *Server) SetRequestDecoder(d RequestDecoder) {
 	s.rebuildOptions()
 }
 
-// SetResponseEncoder replaces the encoder the server uses to write responses,
-// taking control of their wire form. The default is EncodeResponse. Like Use,
-// it panics once any method is registered, or on a nil encoder.
+// SetResponseEncoder installs an encoder for outbound responses, taking control
+// of their wire form. Absent one, a Response writes itself. Like Use, it panics
+// once any method is registered, or on a nil encoder.
 //
-// The encoder is installed as json/v2's marshaler for a *Response within the
-// options SetOptions manages, and outranks any marshaler for that type set
-// there.
+// Shorthand for SetOptions(json.WithMarshalers(json.MarshalToFunc(e))), except
+// that the encoder outranks any *Response marshaler set there.
 func (s *Server) SetResponseEncoder(e ResponseEncoder) {
 	if e == nil {
 		panic("jsonrpc: SetResponseEncoder requires a non-nil encoder")
@@ -403,104 +393,6 @@ func (s *Server) options() json.Options {
 // same code that enforces them for any other unmarshaler.
 func (s *Server) decode(data jsontext.Value, req *Request) error {
 	return json.Unmarshal(data, req, s.options())
-}
-
-// DecodeRequest is the package's default RequestDecoder. It walks one request
-// object token by token so every rejection carries a message this package wrote
-// rather than one from the JSON library: an unrecognized envelope member, a
-// non-string method, or non-structured params are Invalid Request, while
-// malformed input is a Parse error.
-//
-// Duplicate member names are rejected anywhere, including inside params, since
-// detection is tokenizer-level. Params content is otherwise not validated, so
-// unknown members inside it are the handler's concern. Per the spec params must
-// be an object or array whenever present, so null is rejected like any other
-// scalar; a request with no parameters omits the member.
-//
-// Required members are not checked here: Serve rejects a missing method or
-// wrong version on every path. DecodeRequest reads exactly one value from d, so
-// a custom decoder can delegate to it and adjust the result.
-func DecodeRequest(d *jsontext.Decoder, req *Request) error {
-	tok, err := d.ReadToken()
-	if err != nil {
-		return tokenError(err)
-	}
-	if tok.Kind() != jsontext.KindBeginObject {
-		return NewError(CodeInvalidRequest, "request must be a JSON object")
-	}
-
-	for d.PeekKind() != jsontext.KindEndObject {
-		tok, err := d.ReadToken()
-		if err != nil {
-			return tokenError(err)
-		}
-		// Token.String allocates, so the name stays valid across the reads
-		// below; the Token itself does not.
-		switch name := tok.String(); name {
-		case "jsonrpc":
-			tok, err := d.ReadToken()
-			if err != nil {
-				return tokenError(err)
-			}
-			if tok.Kind() != jsontext.KindString {
-				return NewError(CodeInvalidRequest, "jsonrpc must be a string")
-			}
-			// Whether the version is "2.0" is Serve's verdict: failing here
-			// would discard an id we can still read.
-			req.JSONRPC = tok.String()
-
-		case "method":
-			tok, err := d.ReadToken()
-			if err != nil {
-				return tokenError(err)
-			}
-			if tok.Kind() != jsontext.KindString {
-				return NewError(CodeInvalidRequest, "method must be a string")
-			}
-			req.Method = tok.String()
-
-		case "params":
-			val, err := d.ReadValue()
-			if err != nil {
-				return tokenError(err)
-			}
-			switch val.Kind() {
-			case jsontext.KindBeginObject, jsontext.KindBeginArray:
-				// ReadValue's buffer is only valid until the next read.
-				req.Params = jsontext.Value(val.Clone())
-			default:
-				// Including null: the member is present but unstructured.
-				// Omit params entirely to send none.
-				return NewError(CodeInvalidRequest, "params must be an object or array")
-			}
-
-		case "id":
-			val, err := d.ReadValue()
-			if err != nil {
-				return tokenError(err)
-			}
-			req.ID = jsontext.Value(val.Clone())
-
-		default:
-			return NewError(CodeInvalidRequest, "unknown member: "+name)
-		}
-	}
-
-	// Consume the closing brace, completing the one value this decoder reads.
-	if _, err := d.ReadToken(); err != nil {
-		return tokenError(err)
-	}
-	return nil
-}
-
-// tokenError maps a tokenizer failure to the spec's codes: a duplicate member
-// name is well-formed JSON violating uniqueness (Invalid Request), anything
-// else is malformed input (Parse error).
-func tokenError(err error) *Error {
-	if errors.Is(err, jsontext.ErrDuplicateName) {
-		return NewError(CodeInvalidRequest, err.Error())
-	}
-	return NewError(CodeParseError, err.Error())
 }
 
 // classifyDecodeError maps a decode failure to the spec's codes. A decoder that

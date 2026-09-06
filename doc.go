@@ -34,40 +34,35 @@
 //
 // # Decoding and encoding
 //
-// Turning a message into a Request is a seam: a RequestDecoder, which has
-// json.UnmarshalFromFunc's signature. The default, DecodeRequest, walks the
-// message token by token so every rejection carries a message this package
-// wrote. It is strict — duplicate member names anywhere and unknown members on
-// the envelope are Invalid Request (unknown members inside params are
-// tolerated) — and per the spec params must be structured whenever present, so
-// a typed handler's P is a struct or a slice, never a bare scalar.
-// "params":null is rejected like any other scalar; a request with no
-// parameters omits the member, as NewParams(nil) and Client.Call with nil
-// params do.
+// Request and Response carry their own wire forms, as any Go type may:
+// Request.UnmarshalJSONFrom and Response.MarshalJSONTo apply to every
+// json.Unmarshal and json.Marshal of those types, inside this package or out,
+// under json/v2 or v1. A Server overrides either, since json/v2 consults the
+// options before a type's methods.
 //
-// Server.SetRequestDecoder installs a different one, taking control of the
-// errors reported for a malformed envelope: an *Error from a decoder chooses
-// the code, message, and Data, while any other error is classified as a Parse
-// error or an Invalid Request. Either way the ErrorHandler has the final say.
-// A custom decoder can delegate to DecodeRequest and adjust the result.
+// The request decode walks the message token by token so every rejection
+// carries a message this package wrote. It is strict — duplicate member names
+// anywhere and unknown members on the envelope are Invalid Request (unknown
+// members inside params are tolerated) — and per the spec params must be
+// structured whenever present, so a typed handler's P is a struct or a slice,
+// never a bare scalar. "params":null is rejected like any other scalar; a
+// request with no parameters omits the member, as NewParams(nil) and
+// Client.Call with nil params do.
 //
-// A custom decoder is installed as json/v2's unmarshaler for a *Request, so it
-// must read exactly one JSON value — one that ignores the message still calls
-// SkipValue — and json/v2 rejects anything following that value.
+// Server.SetRequestDecoder installs a RequestDecoder over it, taking control of
+// the errors reported for a malformed envelope: an *Error from a decoder
+// chooses the code, message, and Data, while any other error is classified as a
+// Parse error or an Invalid Request. Either way the ErrorHandler has the final
+// say. Whatever the decoder does, Serve independently validates every Request
+// it dispatches (id shape, "2.0" version, non-empty method), since transports
+// may build a Request without decoding one.
 //
-// Whatever the decoder does, Serve independently validates every Request it
-// dispatches (id shape, "2.0" version, non-empty method), since transports may
-// build a Request without decoding one.
-//
-// Writing a Response is the mirror seam: a ResponseEncoder, which has
-// json.MarshalToFunc's signature and is installed with
-// Server.SetResponseEncoder. The default, EncodeResponse, writes the canonical
-// object — the version from Version, then result or error, then id — and
-// reports a response holding both members or neither rather than sending it. A
-// custom encoder decides the wire form of every response the server sends, and
-// can delegate to EncodeResponse. Its errors are not JSON-RPC errors: there is
-// no response left to carry one, so they surface as ServeMessage's error
-// return.
+// Server.SetResponseEncoder is the mirror, deciding the wire form of every
+// response the server sends. The default writes the canonical object — the
+// version from Version, then result or error, then id — and reports a response
+// holding both members or neither rather than sending it. An encoder's errors
+// are not JSON-RPC errors, since there is no response left to carry one, so
+// they surface as ServeMessage's error return.
 //
 // # Options
 //
@@ -80,12 +75,12 @@
 // like Use, must run before any method is registered; for a single method, use
 // Raw(fn, opts) with RegisterRaw.
 //
-// The RequestDecoder and ResponseEncoder ride in the same options, as the
+// A RequestDecoder or ResponseEncoder rides in the same options, as the
 // unmarshaler for *Request and the marshaler for *Response, outranking anything
-// set for those types through SetOptions. Sharing one policy has two
-// consequences: jsontext-level options such as
-// jsontext.AllowDuplicateNames govern the envelope decode while json-level
-// ones do not (DecodeRequest walks tokens and stores params raw), and omitted
+// set for those types here — the setters' one advantage over installing the
+// functions directly. Sharing one policy has two consequences: jsontext-level
+// options such as jsontext.AllowDuplicateNames govern the envelope decode while
+// json-level ones do not (it walks tokens and stores params raw), and omitted
 // params yield the zero P without consulting any unmarshaler.
 //
 // # Errors
@@ -135,15 +130,10 @@
 // ask an interface.
 //
 // NewSuccessResponse and NewErrorResponse build one, normalizing an empty
-// result or id to JSON null. A Response written by hand can still hold a shape
-// the spec forbids, so its MarshalJSONTo — EncodeResponse under another name —
-// reports one holding both members or neither instead of sending it. That check
-// runs under both json packages, and a Server applies its ResponseEncoder in
-// place of it.
-//
-// DecodeResponse parses one response object and checks the same invariants
-// coming the other way; DecodeResponses does it for a batch reply. Plain
-// json.Unmarshal into a Response works too, unchecked.
+// result or id to JSON null; a hand-built Response holding both members or
+// neither is reported when it marshals rather than sent. DecodeResponse checks
+// the same invariants coming the other way, and DecodeResponses does it for a
+// batch reply; plain json.Unmarshal into a Response works too, unchecked.
 //
 // # Polymorphic fields
 //
