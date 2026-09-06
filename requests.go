@@ -8,8 +8,8 @@ import (
 const Version = "2.0"
 
 // Request is a JSON-RPC 2.0 request, or a notification when len(ID) == 0.
-// Params and ID stay raw because the spec leaves their types open; decode
-// them at the point of use.
+// Params and ID stay raw because the spec leaves their types open; decode them
+// at the point of use.
 type Request struct {
 	JSONRPC string         `json:"jsonrpc"`
 	Method  string         `json:"method"`
@@ -21,14 +21,14 @@ func (r *Request) IsNotification() bool {
 	return len(r.ID) == 0
 }
 
-// NewRequest assembles a Request. Params and id are raw JSON — build them
-// with NewParams and NewID. For a notification, use NewNotification.
+// NewRequest assembles a Request. Params and id are raw JSON; build them with
+// NewParams and NewID. For a notification, use NewNotification.
 func NewRequest(method string, params, id jsontext.Value) *Request {
 	return &Request{JSONRPC: Version, Method: method, Params: params, ID: id}
 }
 
-// NewNotification assembles a Request without an id, so the server produces
-// no response.
+// NewNotification assembles a Request without an id, so the server sends no
+// response.
 func NewNotification(method string, params jsontext.Value) *Request {
 	return &Request{JSONRPC: Version, Method: method, Params: params}
 }

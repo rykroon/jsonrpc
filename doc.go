@@ -2,118 +2,97 @@
 //
 // # Pieces
 //
-// Server holds a registry of methods and dispatches a Request to one:
+// Server holds a registry of methods and dispatches requests to them:
 //
 //   - Server.Register installs a Handler — func(context.Context, P) (R, error)
 //     — under a method name. This is the normal way to write a method.
 //   - Server.RegisterRaw installs a RawHandler, which works in raw params and
-//     result bytes, for the cases where a method wants that control.
-//   - Server.SetErrorHandler decides what every failure looks like on the
-//     wire.
-//   - Server.Serve(ctx, *Request) Response dispatches a single decoded
-//     Request; returns nil for notifications.
+//     result bytes.
+//   - Server.SetErrorHandler decides what every failure looks like on the wire.
+//   - Server.Serve dispatches one decoded Request, returning nil for a
+//     notification.
 //
 // Cross-cutting concerns (auth, logging, validation) are added as Middleware
 // — func(RawHandler) RawHandler — passed per method to Server.Register /
 // RegisterRaw or server-wide via Server.Use. Middleware works on the raw
 // layer, so one middleware serves typed and raw methods alike.
 //
-// Server.Register runs a typed pipeline (raw bytes → P → R → raw bytes) on
-// top of RegisterRaw. Raw is that pipeline as a free function: it adapts a
-// Handler into a RawHandler you can hold, reuse, or wrap in Middleware — the
-// way to run a pre-decode hook (e.g. JSON schema validation, which inspects
-// the raw params without decoding them) is Middleware around Raw(fn).
+// Register runs a typed pipeline (raw bytes → P → R → raw bytes) on top of
+// RegisterRaw. Raw is that pipeline as a free function, so a pre-decode hook
+// (e.g. JSON schema validation) is Middleware wrapped around Raw(fn).
 //
-// The decode owns structural failure and nothing more: params that do not fit
-// P are Invalid params, and whether the decoded values are acceptable is the
-// Handler's judgment, returned as its own error. Validation therefore lives
-// in the Handler, next to the code that depends on it, rather than in a
-// middleware that decodes the params a second time.
+// The decode owns structural failure only: params that do not fit P are
+// Invalid params, and whether the decoded values are acceptable is the
+// Handler's judgment. Validation therefore lives in the Handler rather than in
+// a middleware that decodes the params a second time.
 //
-// Server.ServeMessage is the byte-level entry point for transports that
-// work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing,
-// the spec's in-band parse error reporting, and batch messages (JSON
-// arrays), which are dispatched per element. Protocol errors carry the
-// specific cause as their message and attach no Data. HTTP adapters that
-// prefer to surface parse failures as HTTP 400 should skip ServeMessage and
-// call Serve directly.
+// Server.ServeMessage is the byte-level entry point for transports that work
+// in raw messages (WebSocket, stdio, TCP). It handles JSON parsing, the spec's
+// in-band parse error reporting, and batch messages (JSON arrays), which are
+// dispatched per element. HTTP adapters that prefer parse failures as HTTP 400
+// should call Serve directly instead.
 //
 // # Decoding
 //
-// Turning a message into a Request is a seam: a RequestDecoder, which is
-// func(*jsontext.Decoder, *Request) error — json.UnmarshalFromFunc's
-// signature, so a decoder works on either side. The package default,
-// DecodeRequest, walks the message token by token so that every rejection
-// carries a message this package wrote rather than one from the JSON
-// library. It is strict — duplicate object member names anywhere and
-// unknown members on the request envelope are rejected as Invalid Request
-// (unknown members inside params are tolerated), and per the spec params
-// must be a structured value whenever the member is present, so a typed
-// handler's P is a struct or a slice, never a bare scalar. "params":null is
-// rejected like any other scalar — a request with no parameters omits the
-// member, which is what NewParams(nil) and Client.Call with nil params do.
+// Turning a message into a Request is a seam: a RequestDecoder, which has
+// json.UnmarshalFromFunc's signature. The default, DecodeRequest, walks the
+// message token by token so every rejection carries a message this package
+// wrote. It is strict — duplicate member names anywhere and unknown members on
+// the envelope are Invalid Request (unknown members inside params are
+// tolerated) — and per the spec params must be structured whenever present, so
+// a typed handler's P is a struct or a slice, never a bare scalar.
+// "params":null is rejected like any other scalar; a request with no
+// parameters omits the member, as NewParams(nil) and Client.Call with nil
+// params do.
 //
-// Server.SetRequestDecoder installs a different one, which is how a caller
-// takes control of the errors reported for a malformed or non-conforming
-// envelope: returning an *Error from a decoder chooses the code, message, and
-// Data, while any other error is classified as a Parse error or an Invalid
-// Request. Either way the server's ErrorHandler has the final say. A custom
-// decoder can delegate to DecodeRequest and adjust the result.
+// Server.SetRequestDecoder installs a different one, taking control of the
+// errors reported for a malformed envelope: an *Error from a decoder chooses
+// the code, message, and Data, while any other error is classified as a Parse
+// error or an Invalid Request. Either way the ErrorHandler has the final say.
+// A custom decoder can delegate to DecodeRequest and adjust the result.
 //
-// A custom decoder is installed as json/v2's unmarshaler for a *Request, so
-// it reads exactly one JSON value from the decoder it is handed — one that
-// ignores the message still calls SkipValue — and json/v2 rejects anything
-// following that value. Trailing data is therefore not a rule a custom
-// decoder can forget.
+// A custom decoder is installed as json/v2's unmarshaler for a *Request, so it
+// must read exactly one JSON value — one that ignores the message still calls
+// SkipValue — and json/v2 rejects anything following that value.
 //
 // Whatever the decoder does, Serve independently validates every Request it
-// dispatches — the id shape, the "2.0" version, and a non-empty method —
-// because transports may build a Request without decoding one at all.
+// dispatches (id shape, "2.0" version, non-empty method), since transports may
+// build a Request without decoding one.
 //
 // # Options
 //
-// The server does all of its JSON work under one json.Options value, which
-// Server.SetOptions installs: decoding the envelope, decoding params into a
-// Handler's P, marshaling its R, and writing responses. Any json/v2 option is
-// accepted; the ones to reach for are json.WithUnmarshalers, carrying a
-// json.UnmarshalFromFunc for a params type, and json.WithMarshalers,
-// carrying a json.MarshalToFunc for a result type — they let a method's
-// types take a wire form the types themselves do not define. Options are
-// captured into each handler at registration time, so SetOptions, like Use,
-// must run before any method is registered; for a single method, adapt it
-// with Raw(fn, opts) and install that with RegisterRaw.
+// The server does all of its JSON work under one json.Options value installed
+// by Server.SetOptions: the envelope decode, params into a Handler's P,
+// marshaling its R, and writing responses. Any json/v2 option is accepted; the
+// ones to reach for are json.WithUnmarshalers and json.WithMarshalers, which
+// let a method's types take a wire form the types themselves do not define.
+// Options are captured into each handler at registration time, so SetOptions,
+// like Use, must run before any method is registered; for a single method, use
+// Raw(fn, opts) with RegisterRaw.
 //
-// The RequestDecoder rides in the same options, as json/v2's unmarshaler for
-// *Request — SetRequestDecoder is a specialization of SetOptions, and the
-// decoder it installs outranks any unmarshaler for *Request set through
-// SetOptions. Two consequences of sharing one policy are worth knowing.
-// jsontext-level options such as jsontext.AllowDuplicateNames also govern
-// the envelope decode, while json-level ones do not reach it: DecodeRequest
-// walks tokens and stores params as a raw jsontext.Value, so unmarshalers and
-// name matching apply only when a Handler decodes P. And omitted params yield
-// the zero P without consulting any unmarshaler.
+// The RequestDecoder rides in the same options as the unmarshaler for
+// *Request, outranking any unmarshaler for that type set through SetOptions.
+// Sharing one policy has two consequences: jsontext-level options such as
+// jsontext.AllowDuplicateNames govern the envelope decode while json-level
+// ones do not (DecodeRequest walks tokens and stores params raw), and omitted
+// params yield the zero P without consulting any unmarshaler.
 //
 // # Errors
 //
-// Every component that can fail returns a plain error: Handler, RawHandler,
-// and RequestDecoder. Returning an *Error says
-// the component classified the failure and names the code, message, and Data;
-// returning anything else leaves that decision to the server. Because the
-// return type is error, a handler or Middleware can wrap with fmt.Errorf and
-// %w, and the context survives all the way out.
+// Handler, RawHandler, and RequestDecoder all return a plain error. Returning
+// an *Error names the code, message, and Data; anything else leaves that to
+// the server, and can be wrapped with fmt.Errorf and %w without losing context.
 //
 // Server.SetErrorHandler installs the ErrorHandler that turns each of those
-// errors into the *Error sent to the client. It is called for every failure
-// the server reports — a failed decode, a handler's error, and the protocol
-// failures Serve detects itself — and for a notification too, where its
-// *Error is discarded but the failure can still be logged rather than lost.
-// One function therefore decides every error object the server emits.
+// errors into the *Error sent to the client. It sees every failure the server
+// reports — a failed decode, a handler's error, the protocol failures Serve
+// detects — including for notifications, where its *Error is discarded but the
+// failure can still be logged.
 //
 // The default, DefaultErrorHandler, sends an *Error verbatim and turns
 // anything else into an Internal error carrying the error's message. That
-// last part reports an unclassified failure's text to the client, so a server
-// that must not leak internals installs a handler that logs err and returns a
-// fixed *Error:
+// reports an unclassified failure's text to the client, so a server that must
+// not leak internals installs its own:
 //
 //	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) *Error {
 //		if e, ok := errors.AsType[*jsonrpc.Error](err); ok && e != nil {
@@ -125,53 +104,45 @@
 //
 // # Client
 //
-// Client wraps a Sender — a function that round-trips a Request to a
-// Response across some transport. Server.Sender adapts a Server into a
-// Sender for in-process use. The jsonrpchttp subpackage provides an HTTP
-// adapter (both an http.Handler and a Sender); transport authors writing
-// for other wires implement Sender themselves.
+// Client wraps a Sender, which round-trips a Request to a Response across some
+// transport. Server.Sender adapts a Server for in-process use, and the
+// jsonrpchttp subpackage provides an HTTP adapter; other wires implement
+// Sender themselves.
 //
-// Client.Call and Client.Notify are the convenience path: Call marshals
-// params, generates an id, sends, and decodes the result, returning
-// server-reported errors as *Error; Notify sends a notification. For full
-// control, build a Request with NewRequest or NewNotification (with NewID
-// and NewParams for the polymorphic fields), round-trip it with
-// Client.Send, then check Response.IsError and decode the result with
+// Client.Call marshals params, generates an id, sends, and decodes the result,
+// returning server-reported errors as *Error; Client.Notify sends a
+// notification. For full control, build a Request with NewRequest or
+// NewNotification (with NewID and NewParams for the polymorphic fields),
+// round-trip it with Client.Send, then check Response.IsError and decode with
 // Response.Decode.
 //
 // # Responses
 //
-// Response is an interface with exactly two implementations, matching the
-// two shapes the spec allows: *SuccessResponse carries a result and
-// *ErrorResponse carries an error object. Serve returns one of them (or
-// nil for a notification), and the interface's accessors — Result, Error,
-// ID, IsSuccess, IsError, Decode — let callers work with either without a
-// type switch.
+// Response is an interface with exactly two implementations, matching the two
+// shapes the spec allows: *SuccessResponse and *ErrorResponse. Its accessors —
+// Result, Error, ID, IsSuccess, IsError, Decode — let callers work with either
+// without a type switch.
 //
-// Both concrete types keep their fields unexported and write themselves to
-// the wire with MarshalJSONTo, so a response can only be built by
-// NewSuccessResponse, NewErrorResponse, or DecodeResponse. The spec's
-// invariants — a result member on every success, an id member on both —
-// therefore hold by construction, and a response that somehow lacks one
-// fails to marshal rather than reaching the wire malformed.
+// Both types keep their fields unexported and write themselves with
+// MarshalJSONTo, so a response can only be built by NewSuccessResponse,
+// NewErrorResponse, or DecodeResponse. The spec's invariants therefore hold by
+// construction, and a malformed response fails to marshal rather than reaching
+// the wire.
 //
 // Because Response is an interface it cannot be unmarshaled into.
-// DecodeResponse turns one response object into the right concrete type,
-// and DecodeResponses does the same for a batch reply; a transport
-// implementing Sender uses them to parse what comes back off the wire.
+// DecodeResponse turns one response object into the right concrete type, and
+// DecodeResponses does the same for a batch reply.
 //
 // # Polymorphic fields
 //
-// Request.Params, Request.ID, Response.Result, and Error.Data are stored
-// as jsontext.Value because the spec leaves their types open. Decode them
-// into concrete types at the point of use; the typed helpers
-// (Server.Register and Raw) do this for you.
+// Request.Params, Request.ID, Response.Result, and Error.Data are stored as
+// jsontext.Value because the spec leaves their types open. Decode them at the
+// point of use; Server.Register and Raw do it for you.
 //
 // # Not included
 //
-// Client-side batching is not supported: Sender is a single
-// request/response seam. (Server-side batch messages are handled by
-// ServeMessage.) The seams — Sender on the client side, Server.Serve and
-// Server.ServeMessage on the server side — are designed so users can
-// build additional transports on top of the core package.
+// Client-side batching: Sender is a single request/response seam. (Server-side
+// batches are handled by ServeMessage.) The seams — Sender on the client side,
+// Serve and ServeMessage on the server side — let users build additional
+// transports on top of the core package.
 package jsonrpc

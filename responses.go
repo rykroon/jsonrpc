@@ -9,26 +9,24 @@ import (
 
 // Response is a JSON-RPC 2.0 response: either a *SuccessResponse carrying a
 // result or an *ErrorResponse carrying an error object. The spec allows no
-// third shape and forbids both members at once, so the two concrete types are
-// the whole set; the interface exists so Server.Serve and Sender can return
-// either one.
+// third shape, so those two are the whole set; the interface exists so
+// Server.Serve and Sender can return either one.
 //
-// The concrete types keep their fields unexported, so a Response can only come
-// from NewSuccessResponse, NewErrorResponse, or DecodeResponse. That makes the
-// invariants — a result member on every success, an id member on both — hold
-// by construction rather than by convention.
+// Both types keep their fields unexported, so a Response can only come from
+// NewSuccessResponse, NewErrorResponse, or DecodeResponse. The spec's
+// invariants — a result member on every success, an id member on both —
+// therefore hold by construction.
 type Response interface {
 	// Result returns the result member, or nil on an error response.
 	Result() jsontext.Value
 	// Error returns the error object, or nil on a success response.
 	Error() *Error
-	// ID returns the id member. It is JSON null when the request id could not
-	// be determined.
+	// ID returns the id member, JSON null when the request id was unreadable.
 	ID() jsontext.Value
 	IsSuccess() bool
 	IsError() bool
-	// Decode unmarshals the result into the given target. It reports an error
-	// on an error response, so check IsError (or Error) first.
+	// Decode unmarshals the result into the given target. It fails on an error
+	// response, so check IsError first.
 	Decode(any) error
 }
 
@@ -45,9 +43,9 @@ type SuccessResponse struct {
 	id     jsontext.Value
 }
 
-// NewSuccessResponse assembles a SuccessResponse. An empty result or id
-// becomes JSON null, since the spec requires both members to be present and
-// the encoder rejects an empty raw value.
+// NewSuccessResponse assembles a SuccessResponse. An empty result or id becomes
+// JSON null, since the spec requires both members and the encoder rejects an
+// empty raw value.
 func NewSuccessResponse(result, id jsontext.Value) *SuccessResponse {
 	if len(result) == 0 {
 		result = jsontext.Value("null")
@@ -76,10 +74,10 @@ func (r *SuccessResponse) Decode(into any) error {
 	return json.Unmarshal(r.result, into)
 }
 
-// MarshalJSONTo writes the response directly to enc. The members are written
-// as tokens rather than through a struct because the shape is fixed by the
-// spec and the fields are unexported; WriteValue also rejects an empty raw
-// value, so a malformed response fails here instead of reaching the wire.
+// MarshalJSONTo writes the response directly to enc, as tokens rather than
+// through a struct: the shape is fixed by the spec and the fields are
+// unexported. WriteValue rejects an empty raw value, so a malformed response
+// fails here instead of reaching the wire.
 func (r *SuccessResponse) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
 		return err
@@ -112,7 +110,7 @@ type ErrorResponse struct {
 }
 
 // NewErrorResponse assembles an ErrorResponse. An empty id becomes JSON null,
-// which is what the spec requires when the request id could not be read.
+// as the spec requires when the request id could not be read.
 func NewErrorResponse(err *Error, id jsontext.Value) *ErrorResponse {
 	if len(id) == 0 {
 		id = jsontext.Value("null")
@@ -130,8 +128,7 @@ func (r *ErrorResponse) IsSuccess() bool { return false }
 
 func (r *ErrorResponse) IsError() bool { return true }
 
-// Decode always fails: an error response carries no result. Check IsError
-// before decoding.
+// Decode always fails: an error response carries no result.
 func (r *ErrorResponse) Decode(any) error {
 	return errors.New("jsonrpc: error response has no result to decode")
 }
@@ -163,22 +160,20 @@ func (r *ErrorResponse) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return enc.WriteToken(jsontext.EndObject)
 }
 
-// DecodeResponse parses one response object, returning a *SuccessResponse or
-// an *ErrorResponse depending on which member is present. It is the client-side
-// counterpart to DecodeRequest and the seam every transport needs, because a
-// Response is an interface and so cannot be unmarshaled into directly.
+// DecodeResponse parses one response object, returning a *SuccessResponse or an
+// *ErrorResponse depending on which member is present. Every transport needs
+// it, since a Response is an interface and cannot be unmarshaled into directly.
 //
-// Exactly one of result and error must be present — the spec's core invariant,
-// and the only way to tell the two shapes apart. Members the spec does not
-// define are ignored, so a server that decorates its responses still
-// interoperates. Duplicate member names are rejected.
+// Exactly one of result and error must be present — the spec's invariant, and
+// the only way to tell the two shapes apart. Undefined members are ignored, so
+// a server that decorates its responses still interoperates; duplicate member
+// names are rejected.
 //
 // Use DecodeResponses for a batch reply.
 func DecodeResponse(data jsontext.Value) (Response, error) {
-	// Result is a jsontext.Value rather than a pointer so that a present
+	// Result is a jsontext.Value rather than a pointer so a present
 	// "result":null (a legal success response) is distinguishable from an
-	// absent member: the former decodes to the four bytes "null", the latter
-	// leaves the field nil.
+	// absent member: the former decodes to four bytes, the latter to nil.
 	var raw struct {
 		JSONRPC string         `json:"jsonrpc"`
 		Result  jsontext.Value `json:"result"`
@@ -207,8 +202,7 @@ func DecodeResponse(data jsontext.Value) (Response, error) {
 }
 
 // DecodeResponses parses a batch reply — a JSON array of response objects —
-// element by element. A response to a single request is not an array; use
-// DecodeResponse for that.
+// element by element. Use DecodeResponse for a reply to a single request.
 func DecodeResponses(data jsontext.Value) ([]Response, error) {
 	var elems []jsontext.Value
 	if err := json.Unmarshal(data, &elems); err != nil {

@@ -8,8 +8,8 @@ import (
 
 // Sender round-trips a Request to a Response across a transport. The error
 // return is for transport failures only; errors reported by the server arrive
-// as an *ErrorResponse. For notifications the returned Response is ignored and
-// should be nil.
+// as an *ErrorResponse. For notifications the Response is ignored and should be
+// nil.
 type Sender interface {
 	Send(ctx context.Context, req *Request) (Response, error)
 }
@@ -42,9 +42,9 @@ func NewClient(sender Sender) *Client {
 }
 
 // Call invokes method with params (marshaled by NewParams) and decodes the
-// result into result; a nil result skips decoding. The id comes from an
-// internal counter. Errors reported by the server are returned as *Error;
-// any other error is a transport or decode failure.
+// reply into result; a nil result skips decoding. The id comes from an internal
+// counter. Errors reported by the server are returned as *Error; any other
+// error is a transport or decode failure.
 func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
 	raw, err := NewParams(params)
 	if err != nil {
@@ -58,9 +58,8 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 		return fmt.Errorf("jsonrpc: transport returned no response for call %q", method)
 	}
 	if resp.IsError() {
-		// The returned error is Error()'s value, not IsError's verdict: a
-		// non-nil interface wrapping a nil *Error would otherwise read as a
-		// failed call with no cause.
+		// Return Error()'s value, not IsError's verdict: a non-nil interface
+		// wrapping a nil *Error would otherwise be a failed call with no cause.
 		if rpcErr := resp.Error(); rpcErr != nil {
 			return rpcErr
 		}
@@ -80,9 +79,9 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 	return err
 }
 
-// Send round-trips req via the underlying Sender. JSON-RPC errors from the
-// server arrive as an *ErrorResponse, not in the error return; for
-// notifications the Sender's response is returned as-is (typically nil).
+// Send round-trips req via the underlying Sender. Server-reported errors arrive
+// as an *ErrorResponse, not in the error return; for a notification the
+// Sender's response is returned as-is (typically nil).
 func (c *Client) Send(ctx context.Context, req *Request) (Response, error) {
 	return c.sender.Send(ctx, req)
 }

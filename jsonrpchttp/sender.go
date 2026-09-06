@@ -21,8 +21,8 @@ type Sender struct {
 	// URL is the JSON-RPC endpoint. Required.
 	URL string
 
-	// Client is the HTTP client used for round-trips. If nil,
-	// http.DefaultClient is used.
+	// Client is the HTTP client used for round-trips. Nil means
+	// http.DefaultClient.
 	Client *http.Client
 }
 
@@ -52,7 +52,7 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (jsonrpc.Respon
 	defer resp.Body.Close()
 
 	// A non-2xx reply (proxy 502, server 500, ...) carries no JSON-RPC
-	// response; surface it as a transport error rather than a decode failure.
+	// response; surface it as a transport error, not a decode failure.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		io.Copy(io.Discard, resp.Body)
 		return nil, fmt.Errorf("jsonrpchttp: unexpected HTTP status %s", resp.Status)

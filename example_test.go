@@ -79,13 +79,11 @@ func ExampleClient_Send() {
 	// Output: hello world
 }
 
-// ExampleMiddleware shows a cross-cutting concern composed with a typed
-// handler. The middleware operates on raw params, so it works without
-// touching the typed pipeline.
+// ExampleMiddleware composes a cross-cutting concern with a typed handler. The
+// middleware operates on raw params, so it never touches the typed pipeline.
 func ExampleMiddleware() {
-	// logging is reusable middleware: it knows nothing about the handler's
-	// parameter or result types. The returned func literal converts to
-	// RawHandler automatically — no cast needed.
+	// logging knows nothing about the handler's parameter or result types. The
+	// returned func literal converts to RawHandler with no cast.
 	logging := func(next jsonrpc.RawHandler) jsonrpc.RawHandler {
 		return func(ctx context.Context, params jsontext.Value) (jsontext.Value, error) {
 			fmt.Printf("calling with params: %s\n", params)
@@ -114,8 +112,8 @@ func ExampleMiddleware() {
 // transport adapters that work in raw messages.
 func ExampleServer_ServeMessage() {
 	s := jsonrpc.NewServer()
-	// params arrives as an object or an array — the spec allows no other
-	// shape — so a typed handler takes a struct or a slice, not a bare string.
+	// The spec allows params to be an object or an array only, so a typed
+	// handler takes a struct or a slice, not a bare string.
 	s.Register("echo", func(_ context.Context, p struct {
 		Msg string `json:"msg"`
 	}) (string, error) {
@@ -130,8 +128,7 @@ func ExampleServer_ServeMessage() {
 
 // ExampleServer_SetRequestDecoder replaces the request decoder to control the
 // errors reported for a bad envelope. This one delegates to the package
-// default and then enriches its error, keeping the code and message the
-// default chose while adding the offending message to Data.
+// default, then adds the offending message to the error's Data.
 func ExampleServer_SetRequestDecoder() {
 	type errorData struct {
 		Got string `json:"got"`
@@ -139,8 +136,8 @@ func ExampleServer_SetRequestDecoder() {
 
 	s := jsonrpc.NewServer()
 	s.SetRequestDecoder(func(d *jsontext.Decoder, req *jsonrpc.Request) error {
-		// One ReadValue consumes the decoder's one value and hands back the
-		// raw message, which the error below quotes.
+		// One ReadValue consumes the decoder's one value and hands back the raw
+		// message, which the error below quotes.
 		raw, err := d.ReadValue()
 		if err != nil {
 			return err
@@ -167,10 +164,9 @@ func ExampleServer_SetRequestDecoder() {
 	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"unknown member: surprise","data":{"got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
 }
 
-// ExampleServer_SetOptions installs json/v2 options that every typed method
-// decodes its params and marshals its result with. Here a marshaler renders
-// time.Time results as Unix seconds without the result type carrying a
-// MarshalJSONTo method of its own.
+// ExampleServer_SetOptions installs json/v2 options every typed method decodes
+// and marshals with. Here a marshaler renders time.Time as Unix seconds without
+// the result type carrying a MarshalJSONTo method of its own.
 func ExampleServer_SetOptions() {
 	s := jsonrpc.NewServer()
 	s.SetOptions(json.WithMarshalers(
@@ -192,9 +188,8 @@ func ExampleServer_SetOptions() {
 }
 
 // ExampleServer_SetErrorHandler keeps an unclassified failure's detail off the
-// wire. Errors the library classified — a bad envelope, undecodable params —
-// arrive as *jsonrpc.Error and are already safe to send; anything else is the
-// handler's own error, reported to the client as a fixed message.
+// wire. Errors the library classified arrive as *jsonrpc.Error and are already
+// safe to send; anything else becomes a fixed message.
 func ExampleServer_SetErrorHandler() {
 	s := jsonrpc.NewServer()
 	s.SetErrorHandler(func(_ context.Context, req *jsonrpc.Request, err error) *jsonrpc.Error {

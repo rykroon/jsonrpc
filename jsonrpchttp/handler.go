@@ -1,11 +1,10 @@
-// Package jsonrpchttp provides HTTP adapters for the jsonrpc package.
+// Package jsonrpchttp provides HTTP adapters for the jsonrpc package: Handler
+// is an http.Handler wrapping a *jsonrpc.Server, and Sender implements
+// jsonrpc.Sender by POSTing requests to a URL.
 //
-// Server side: Handler is an http.Handler that wraps a *jsonrpc.Server.
-// Client side: Sender implements jsonrpc.Sender by POSTing requests to a URL.
-//
-// JSON-RPC errors — including parse errors — are returned in-band with
-// HTTP 200; notifications produce 204 No Content. Transports that need
-// HTTP-level parse failures should write their own handler that calls
+// JSON-RPC errors — including parse errors — are returned in-band with HTTP
+// 200; notifications produce 204 No Content. Transports that need HTTP-level
+// parse failures should write their own handler calling
 // (*jsonrpc.Server).Serve directly.
 package jsonrpchttp
 
@@ -35,9 +34,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Compare the media type only, ignoring parameters (e.g. charset) and
-	// case, so well-formed requests like "application/json; charset=utf-8"
-	// are accepted. A missing or unparseable Content-Type is rejected.
+	// Compare the media type only, ignoring parameters and case, so
+	// "application/json; charset=utf-8" is accepted. A missing or unparseable
+	// Content-Type is rejected.
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
 		return
