@@ -42,13 +42,13 @@ func main() {
 ## Middleware
 
 Cross-cutting concerns — auth, logging, validation — are written once as
-`Middleware` (`func(Handler) Handler`) and composed with handlers.
+`Middleware` (`func(RawHandler) RawHandler`) and composed with handlers.
 Because middleware works on the raw params, it layers cleanly over typed
 handlers without touching the typed pipeline:
 
 ```go
 // logging knows nothing about any handler's param or result types.
-func logging(next jsonrpc.Handler) jsonrpc.Handler {
+func logging(next jsonrpc.RawHandler) jsonrpc.RawHandler {
     return func(ctx context.Context, params jsontext.Value) (jsontext.Value, *jsonrpc.Error) {
         log.Printf("rpc params: %s", params)
         return next(ctx, params)
@@ -66,13 +66,36 @@ s.Register("add", add, requireAuth)
 is the outermost layer, and server-wide middleware wraps around per-method
 middleware.
 
+## Encoding and decoding
+
+Params are decoded into `P` and results marshaled from `R` with
+`encoding/json/v2`. `Server.SetOptions` installs json/v2 options for every
+method, so a type can take a wire form it does not define itself:
+
+```go
+s := jsonrpc.NewServer()
+s.SetOptions(json.WithMarshalers(
+    json.MarshalToFunc(func(e *jsontext.Encoder, t time.Time) error {
+        return e.WriteToken(jsontext.Int(t.Unix())) // time.Time results as Unix seconds
+    }),
+))
+s.Register("epoch", epoch) // any time.Time in epoch's result uses the marshaler
+```
+
+`SetOptions` must be called before registering methods. To give one method
+its own options, adapt it yourself: `s.RegisterRaw("m", jsonrpc.Raw(fn, opts))`.
+
 ## What it gives you
 
-- `Server` — a method registry with raw (`RegisterHandler`) and typed
-  (`Register`) registration APIs.
+- `Server` — a method registry. `Register` installs a `Handler`
+  (`func(ctx, P) (R, error)`), the normal way to write a method;
+  `RegisterRaw` installs a `RawHandler` working in raw bytes.
 - `Middleware` / `Server.Use` — compose auth, logging, and validation
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params
+- `Server.SetOptions` — install json/v2 options (e.g. `json.WithMarshalers`,
+  `json.WithUnmarshalers`) that control how every method's params are
+  decoded and results encoded
 - `Server.SetRequestDecoder` — swap the request decoder to control the
   errors reported for a malformed envelope
   marshaling, id generation, and result decoding; server errors come back
@@ -91,10 +114,10 @@ middleware.
 - `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream). Handles batch
   messages (JSON arrays) per the spec.
-- `Typed`, `DecodeParams`, `MarshalResult` — building blocks for the typed
-  pipeline. `Typed(fn)` turns a typed function into a `Handler` you can
-  reuse or wrap in `Middleware` (e.g. JSON schema validation with structured
-  `Error.Data`).
+- `Raw`, `DecodeParams`, `MarshalResult` — building blocks for the typed
+  pipeline. `Raw(fn, opts...)` turns a `Handler` into a `RawHandler` you can
+  reuse, wrap in `Middleware` (e.g. JSON schema validation with structured
+  `Error.Data`), or give its own options.
 - `jsonrpchttp` subpackage — `http.Handler` and `Sender` for the common
   single-request HTTP transport.
 

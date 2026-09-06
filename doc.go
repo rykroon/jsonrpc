@@ -4,21 +4,23 @@
 //
 // Server holds a registry of methods and dispatches a Request to one:
 //
-//   - Server.Register installs a typed function under a method name.
-//   - Server.RegisterHandler installs a raw Handler under a method name.
+//   - Server.Register installs a Handler — func(context.Context, P) (R, error)
+//     — under a method name. This is the normal way to write a method.
+//   - Server.RegisterRaw installs a RawHandler, which works in raw params and
+//     result bytes, for the cases where a method wants that control.
 //   - Server.Serve(ctx, *Request) Response dispatches a single decoded
 //     Request; returns nil for notifications.
 //
 // Cross-cutting concerns (auth, logging, validation) are added as Middleware
-// — func(Handler) Handler — passed per method to Server.Register /
-// RegisterHandler or server-wide via Server.Use.
+// — func(RawHandler) RawHandler — passed per method to Server.Register /
+// RegisterRaw or server-wide via Server.Use. Middleware works on the raw
+// layer, so one middleware serves typed and raw methods alike.
 //
-// Server.Register runs a typed pipeline (raw bytes → typed params → typed
-// result → raw bytes) on top of RegisterHandler; use it for normal methods.
-// Its building blocks — Typed, DecodeParams, and MarshalResult — are free
-// functions. Typed adapts a typed function into a Handler you can hold,
-// reuse, or wrap in Middleware — the way to run a pre-decode hook (e.g.
-// JSON schema validation) is Middleware around Typed(fn).
+// Server.Register runs a typed pipeline (raw bytes → P → R → raw bytes) on
+// top of RegisterRaw. Its building blocks — Raw, DecodeParams, and
+// MarshalResult — are free functions. Raw adapts a Handler into a RawHandler
+// you can hold, reuse, or wrap in Middleware — the way to run a pre-decode
+// hook (e.g. JSON schema validation) is Middleware around Raw(fn).
 //
 // Server.ServeMessage is the byte-level entry point for transports that
 // work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing,
@@ -58,6 +60,29 @@
 // Whatever the decoder does, Serve independently validates every Request it
 // dispatches — the id shape, the "2.0" version, and a non-empty method —
 // because transports may build a Request without decoding one at all.
+//
+// # Options
+//
+// The server does all of its JSON work under one json.Options value, which
+// Server.SetOptions installs: decoding the envelope, decoding params into a
+// Handler's P, marshaling its R, and writing responses. Any json/v2 option is
+// accepted; the ones to reach for are json.WithUnmarshalers, carrying a
+// json.UnmarshalFromFunc for a params type, and json.WithMarshalers,
+// carrying a json.MarshalToFunc for a result type — they let a method's
+// types take a wire form the types themselves do not define. Options are
+// captured into each handler at registration time, so SetOptions, like Use,
+// must run before any method is registered; for a single method, adapt it
+// with Raw(fn, opts) and install that with RegisterRaw.
+//
+// The RequestDecoder rides in the same options, as json/v2's unmarshaler for
+// *Request — SetRequestDecoder is a specialization of SetOptions, and the
+// decoder it installs outranks any unmarshaler for *Request set through
+// SetOptions. Two consequences of sharing one policy are worth knowing.
+// jsontext-level options such as jsontext.AllowDuplicateNames also govern
+// the envelope decode, while json-level ones do not reach it: DecodeRequest
+// walks tokens and stores params as a raw jsontext.Value, so unmarshalers and
+// name matching apply only when a Handler decodes P. And DecodeParams returns
+// the zero P for omitted params without consulting any unmarshaler.
 //
 // Client wraps a Sender — a function that round-trips a Request to a
 // Response across some transport. Server.Sender adapts a Server into a
@@ -99,7 +124,7 @@
 // Request.Params, Request.ID, Response.Result, and Error.Data are stored
 // as jsontext.Value because the spec leaves their types open. Decode them
 // into concrete types at the point of use; the typed helpers
-// (Server.Register, Typed, DecodeParams) do this for you.
+// (Server.Register, Raw, DecodeParams) do this for you.
 //
 // # Not included
 //

@@ -152,7 +152,7 @@ func TestNotificationUnknownMethodProducesNoResponse(t *testing.T) {
 
 func TestNilResultEncodesAsNull(t *testing.T) {
 	s := NewServer()
-	s.RegisterHandler("void", func(_ context.Context, _ jsontext.Value) (jsontext.Value, *Error) {
+	s.RegisterRaw("void", func(_ context.Context, _ jsontext.Value) (jsontext.Value, *Error) {
 		return nil, nil
 	})
 
@@ -698,11 +698,11 @@ func TestNewParamsPassthrough(t *testing.T) {
 	require.Nil(t, out)
 }
 
-func TestTypedWithValidationMiddleware(t *testing.T) {
+func TestRawWithValidationMiddleware(t *testing.T) {
 	s := NewServer()
 	// Pre-decode validation middleware owns the full *Error including
 	// structured Data, then delegates to the typed handler.
-	requirePositive := func(next Handler) Handler {
+	requirePositive := func(next RawHandler) RawHandler {
 		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
@@ -715,10 +715,10 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 			return next(ctx, raw)
 		}
 	}
-	add := Typed(func(_ context.Context, p addParams) (addResult, error) {
+	add := Raw(func(_ context.Context, p addParams) (addResult, error) {
 		return addResult{Sum: p.A + p.B}, nil
 	})
-	s.RegisterHandler("add", add, requirePositive)
+	s.RegisterRaw("add", add, requirePositive)
 
 	c := NewClient(s.Sender())
 
@@ -743,7 +743,7 @@ func TestTypedWithValidationMiddleware(t *testing.T) {
 // tagMiddleware appends its name to *log when the request passes through,
 // letting tests assert ordering of the wrapping.
 func tagMiddleware(name string, log *[]string) Middleware {
-	return func(next Handler) Handler {
+	return func(next RawHandler) RawHandler {
 		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
 			*log = append(*log, name)
 			return next(ctx, raw)
@@ -754,7 +754,7 @@ func tagMiddleware(name string, log *[]string) Middleware {
 func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
 	s := NewServer()
 	// A raw middleware that rejects without ever decoding into the typed P.
-	requirePositive := func(next Handler) Handler {
+	requirePositive := func(next RawHandler) RawHandler {
 		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
@@ -808,7 +808,7 @@ func TestUseAfterRegisterPanics(t *testing.T) {
 		return addResult{Sum: p.A + p.B}, nil
 	})
 	require.Panics(t, func() {
-		s.Use(func(next Handler) Handler { return next })
+		s.Use(func(next RawHandler) RawHandler { return next })
 	})
 }
 
@@ -988,7 +988,7 @@ func TestDefaultDecoderOmittedParams(t *testing.T) {
 	s := NewServer()
 	var seen jsontext.Value
 	called := false
-	s.RegisterHandler("probe", func(_ context.Context, params jsontext.Value) (jsontext.Value, *Error) {
+	s.RegisterRaw("probe", func(_ context.Context, params jsontext.Value) (jsontext.Value, *Error) {
 		seen, called = params, true
 		return jsontext.Value(`"ok"`), nil
 	})
@@ -1210,4 +1210,208 @@ func TestSetRequestDecoderPanics(t *testing.T) {
 			s.SetRequestDecoder(func(*jsontext.Decoder, *Request) error { return nil })
 		})
 	})
+}
+
+// temperature is a params/result member whose wire form the tests control
+// through options rather than methods on the type: a string like "21.5C" when
+// the temperature unmarshaler/marshaler is installed, a bare number otherwise.
+type temperature float64
+
+type tempParams struct {
+	T temperature `json:"t"`
+}
+
+type tempResult struct {
+	T temperature `json:"t"`
+}
+
+func tempUnmarshaler(calls *int) *json.Unmarshalers {
+	return json.UnmarshalFromFunc(func(d *jsontext.Decoder, v *temperature) error {
+		if calls != nil {
+			*calls++
+		}
+		tok, err := d.ReadToken()
+		if err != nil {
+			return err
+		}
+		var f float64
+		if _, err := fmt.Sscanf(tok.String(), "%gC", &f); err != nil {
+			return fmt.Errorf("temperature: want a string like 21.5C, got %s", tok)
+		}
+		*v = temperature(f)
+		return nil
+	})
+}
+
+var tempMarshaler = json.MarshalToFunc(func(e *jsontext.Encoder, v temperature) error {
+	return e.WriteToken(jsontext.String(fmt.Sprintf("%gC", float64(v))))
+})
+
+func echoTemp(_ context.Context, p tempParams) (tempResult, error) {
+	return tempResult{T: p.T}, nil
+}
+
+func TestSetOptionsParamsUnmarshaler(t *testing.T) {
+	const msg = `{"jsonrpc":"2.0","method":"echo","params":{"t":"21.5C"},"id":1}`
+
+	t.Run("without options the string is Invalid params", func(t *testing.T) {
+		s := NewServer()
+		s.Register("echo", echoTemp)
+		code, _, _ := decodeError(t, s, msg)
+		require.Equal(t, CodeInvalidParams, code)
+	})
+
+	t.Run("the installed unmarshaler decodes P", func(t *testing.T) {
+		var calls int
+		s := NewServer()
+		s.SetOptions(json.WithUnmarshalers(tempUnmarshaler(&calls)))
+		s.Register("echo", echoTemp)
+
+		out, err := s.ServeMessage(context.Background(), []byte(msg))
+		require.NoError(t, err)
+		resp := decodeResponse(t, out)
+		require.Nil(t, resp.Error())
+		require.Equal(t, 1, calls)
+		// No marshaler was installed, so the result is the default number.
+		require.JSONEq(t, `{"t":21.5}`, string(resp.Result()))
+	})
+
+	t.Run("omitted params never reach the unmarshaler", func(t *testing.T) {
+		var calls int
+		s := NewServer()
+		s.SetOptions(json.WithUnmarshalers(tempUnmarshaler(&calls)))
+		s.Register("echo", echoTemp)
+
+		out, err := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"echo","id":1}`))
+		require.NoError(t, err)
+		resp := decodeResponse(t, out)
+		require.Nil(t, resp.Error())
+		require.Equal(t, 0, calls)
+		require.JSONEq(t, `{"t":0}`, string(resp.Result()))
+	})
+}
+
+func TestSetOptionsResultMarshaler(t *testing.T) {
+	s := NewServer()
+	s.SetOptions(json.WithMarshalers(tempMarshaler))
+	s.Register("echo", echoTemp)
+
+	out, err := s.ServeMessage(context.Background(),
+		[]byte(`{"jsonrpc":"2.0","method":"echo","params":{"t":21.5},"id":1}`))
+	require.NoError(t, err)
+	// Check the bytes, not a decoded value: the marshaler's output must be
+	// what reaches the wire.
+	require.JSONEq(t, `{"jsonrpc":"2.0","result":{"t":"21.5C"},"id":1}`, string(out))
+}
+
+func TestSetOptionsAppliesToParamsAndBatch(t *testing.T) {
+	s := NewServer()
+	s.SetOptions(json.MatchCaseInsensitiveNames(true))
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
+	})
+
+	t.Run("json option reaches the params decode", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(),
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"A":1,"B":2},"id":1}`))
+		require.NoError(t, err)
+		resp := decodeResponse(t, out)
+		require.Nil(t, resp.Error())
+		require.JSONEq(t, `{"sum":3}`, string(resp.Result()))
+	})
+
+	t.Run("json option does not loosen the envelope", func(t *testing.T) {
+		// The envelope is token-walked, so member matching there is exact.
+		code, msg, _ := decodeError(t, s, `{"jsonrpc":"2.0","Method":"add","id":1}`)
+		require.Equal(t, CodeInvalidRequest, code)
+		require.Equal(t, "unknown member: Method", msg)
+	})
+
+	t.Run("batch split still isolates a duplicate to its element", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(), []byte(`[
+			{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1},
+			{"jsonrpc":"2.0","method":"add","method":"boom","id":2}
+		]`))
+		require.NoError(t, err)
+		resps := decodeResponses(t, out)
+		require.Len(t, resps, 2)
+		require.Nil(t, resps[0].Error())
+		require.NotNil(t, resps[1].Error())
+		require.Equal(t, CodeInvalidRequest, resps[1].Error().Code)
+	})
+}
+
+func TestSetOptionsPreservesRequestDecoder(t *testing.T) {
+	const msg = `{"jsonrpc":"2.0","method":"echo","params":{"t":"21.5C"},"id":1}`
+
+	// tracingDecoder records that it ran, then delegates to the default.
+	tracingDecoder := func(ran *bool) RequestDecoder {
+		return func(d *jsontext.Decoder, req *Request) error {
+			*ran = true
+			return DecodeRequest(d, req)
+		}
+	}
+
+	check := func(t *testing.T, s *Server, ran *bool) {
+		t.Helper()
+		s.Register("echo", echoTemp)
+		out, err := s.ServeMessage(context.Background(), []byte(msg))
+		require.NoError(t, err)
+		resp := decodeResponse(t, out)
+		require.Nil(t, resp.Error())
+		require.True(t, *ran, "custom RequestDecoder did not run")
+		require.JSONEq(t, `{"t":21.5}`, string(resp.Result()), "params unmarshaler did not run")
+	}
+
+	t.Run("SetRequestDecoder then SetOptions", func(t *testing.T) {
+		var ran bool
+		s := NewServer()
+		s.SetRequestDecoder(tracingDecoder(&ran))
+		s.SetOptions(json.WithUnmarshalers(tempUnmarshaler(nil)))
+		check(t, s, &ran)
+	})
+
+	t.Run("SetOptions then SetRequestDecoder", func(t *testing.T) {
+		var ran bool
+		s := NewServer()
+		s.SetOptions(json.WithUnmarshalers(tempUnmarshaler(nil)))
+		s.SetRequestDecoder(tracingDecoder(&ran))
+		check(t, s, &ran)
+	})
+
+	t.Run("the RequestDecoder outranks a *Request unmarshaler in the options", func(t *testing.T) {
+		var ran bool
+		s := NewServer()
+		s.SetOptions(json.WithUnmarshalers(json.JoinUnmarshalers(
+			json.UnmarshalFromFunc(func(d *jsontext.Decoder, _ *Request) error {
+				d.SkipValue()
+				return errors.New("options unmarshaler must not run")
+			}),
+			tempUnmarshaler(nil),
+		)))
+		s.SetRequestDecoder(tracingDecoder(&ran))
+		check(t, s, &ran)
+	})
+}
+
+func TestSetOptionsPanicsAfterRegister(t *testing.T) {
+	s := newTestServer(t)
+	require.Panics(t, func() { s.SetOptions(json.WithMarshalers(tempMarshaler)) })
+}
+
+func TestRawWithOptions(t *testing.T) {
+	// One method gets its own options through Raw + RegisterRaw; the server's
+	// options stay at their defaults, as the sibling method shows.
+	s := NewServer()
+	opts := json.JoinOptions(json.WithUnmarshalers(tempUnmarshaler(nil)), json.WithMarshalers(tempMarshaler))
+	s.RegisterRaw("strings", Raw(echoTemp, opts))
+	s.Register("numbers", echoTemp)
+
+	out, err := s.ServeMessage(context.Background(),
+		[]byte(`{"jsonrpc":"2.0","method":"strings","params":{"t":"21.5C"},"id":1}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"jsonrpc":"2.0","result":{"t":"21.5C"},"id":1}`, string(out))
+
+	code, _, _ := decodeError(t, s, `{"jsonrpc":"2.0","method":"numbers","params":{"t":"21.5C"},"id":2}`)
+	require.Equal(t, CodeInvalidParams, code)
 }

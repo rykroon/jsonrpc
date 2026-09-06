@@ -3,10 +3,11 @@ package jsonrpc_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/rykroon/jsonrpc"
 )
@@ -84,8 +85,8 @@ func ExampleClient_Send() {
 func ExampleMiddleware() {
 	// logging is reusable middleware: it knows nothing about the handler's
 	// parameter or result types. The returned func literal converts to
-	// Handler automatically — no cast needed.
-	logging := func(next jsonrpc.Handler) jsonrpc.Handler {
+	// RawHandler automatically — no cast needed.
+	logging := func(next jsonrpc.RawHandler) jsonrpc.RawHandler {
 		return func(ctx context.Context, params jsontext.Value) (jsontext.Value, *jsonrpc.Error) {
 			fmt.Printf("calling with params: %s\n", params)
 			return next(ctx, params)
@@ -164,4 +165,28 @@ func ExampleServer_SetRequestDecoder() {
 		[]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`))
 	fmt.Println(string(out))
 	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"unknown member: surprise","data":{"got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
+}
+
+// ExampleServer_SetOptions installs json/v2 options that every typed method
+// decodes its params and marshals its result with. Here a marshaler renders
+// time.Time results as Unix seconds without the result type carrying a
+// MarshalJSONTo method of its own.
+func ExampleServer_SetOptions() {
+	s := jsonrpc.NewServer()
+	s.SetOptions(json.WithMarshalers(
+		json.MarshalToFunc(func(e *jsontext.Encoder, t time.Time) error {
+			return e.WriteToken(jsontext.Int(t.Unix()))
+		}),
+	))
+	s.Register("epoch", func(_ context.Context, _ struct{}) (struct {
+		At time.Time `json:"at"`
+	}, error) {
+		return struct {
+			At time.Time `json:"at"`
+		}{At: time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)}, nil
+	})
+
+	out, _ := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"epoch","id":1}`))
+	fmt.Println(string(out))
+	// Output: {"jsonrpc":"2.0","result":{"at":1257894000},"id":1}
 }
