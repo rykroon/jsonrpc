@@ -698,27 +698,22 @@ func TestNewParamsPassthrough(t *testing.T) {
 	require.Nil(t, out)
 }
 
-func TestRawWithValidationMiddleware(t *testing.T) {
+func TestRawWithHandlerValidation(t *testing.T) {
 	s := NewServer()
-	// Pre-decode validation middleware owns the full *Error including
-	// structured Data, then delegates to the typed handler.
-	requirePositive := func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
-			var p addParams
-			if err := json.Unmarshal(raw, &p); err != nil {
-				return nil, NewError(CodeInvalidParams, err.Error())
-			}
-			if p.A < 0 || p.B < 0 {
-				return nil, NewError(CodeInvalidParams, "operands must be non-negative").
-					MustSetData(map[string]any{"a": p.A, "b": p.B})
-			}
-			return next(ctx, raw)
-		}
-	}
+	// Validation lives in the handler, next to the code that depends on it,
+	// and owns the full *Error including structured Data. The decode above it
+	// only reports params that do not fit P.
 	add := Raw(func(_ context.Context, p addParams) (addResult, error) {
+		if p.A < 0 || p.B < 0 {
+			return addResult{}, NewError(CodeInvalidParams, "operands must be non-negative").
+				MustSetData(map[string]any{"a": p.A, "b": p.B})
+		}
 		return addResult{Sum: p.A + p.B}, nil
 	})
-	s.RegisterRaw("add", add, requirePositive)
+	// A Raw value installs like any other RawHandler, per-method middleware
+	// included.
+	var log []string
+	s.RegisterRaw("add", add, tagMiddleware("mw", &log))
 
 	c := NewClient(s.Sender())
 
@@ -738,6 +733,8 @@ func TestRawWithValidationMiddleware(t *testing.T) {
 	require.NoError(t, resp.Error().UnmarshalData(&detail))
 	require.Equal(t, -1, detail["a"])
 	require.Equal(t, 3, detail["b"])
+
+	require.Equal(t, []string{"mw", "mw"}, log, "middleware ran on both calls")
 }
 
 // tagMiddleware appends its name to *log when the request passes through,
@@ -751,38 +748,42 @@ func tagMiddleware(name string, log *[]string) Middleware {
 	}
 }
 
-func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
+type authKey struct{}
+
+func TestRegisterMiddlewareRunsBeforeDecode(t *testing.T) {
 	s := NewServer()
-	// A raw middleware that rejects without ever decoding into the typed P.
-	requirePositive := func(next RawHandler) RawHandler {
+	// Cross-cutting middleware that rejects on the raw layer without ever
+	// decoding into P — the concern middleware is for, now that params
+	// validation belongs to the handler.
+	requireAuth := func(next RawHandler) RawHandler {
 		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
-			var p addParams
-			if err := json.Unmarshal(raw, &p); err != nil {
-				return nil, NewError(CodeInvalidParams, err.Error())
-			}
-			if p.A < 0 || p.B < 0 {
-				return nil, NewError(CodeInvalidParams, "operands must be non-negative")
+			if ctx.Value(authKey{}) != "secret" {
+				return nil, NewError(CodeServerError, "unauthorized")
 			}
 			return next(ctx, raw)
 		}
 	}
 	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
 		return addResult{Sum: p.A + p.B}, nil
-	}, requirePositive)
+	}, requireAuth)
 
 	c := NewClient(s.Sender())
+	authed := context.WithValue(context.Background(), authKey{}, "secret")
 
-	resp, err := c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
+	resp, err := c.Send(authed, NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), NewID(1)))
 	require.NoError(t, err)
 	require.Nil(t, resp.Error())
 	var ok addResult
 	require.NoError(t, resp.Decode(&ok))
 	require.Equal(t, 5, ok.Sum)
 
-	resp, err = c.Send(context.Background(), NewRequest("add", mustParams(t, addParams{A: -1, B: 3}), NewID(2)))
+	// Unauthorized, and with params that could not decode into P either. The
+	// middleware's error is what comes back, so it ran before the decode.
+	resp, err = c.Send(context.Background(), NewRequest("add", jsontext.Value(`{"a":"x"}`), NewID(2)))
 	require.NoError(t, err)
 	require.NotNil(t, resp.Error())
-	require.Equal(t, CodeInvalidParams, resp.Error().Code)
+	require.Equal(t, CodeServerError, resp.Error().Code)
+	require.Equal(t, "unauthorized", resp.Error().Message)
 }
 
 func TestMiddlewareOrdering(t *testing.T) {
@@ -849,7 +850,7 @@ func TestDuplicateMemberNamesRejected(t *testing.T) {
 		require.Equal(t, CodeInvalidRequest, resp.Error().Code)
 	})
 
-	t.Run("duplicate params via Serve go through DecodeParams", func(t *testing.T) {
+	t.Run("duplicate params via Serve go through the typed decode", func(t *testing.T) {
 		// A transport calling Serve directly may not have tokenized params;
 		// the typed pipeline still rejects duplicates, as Invalid params.
 		resp := s.Serve(context.Background(), &Request{

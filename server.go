@@ -38,10 +38,11 @@ type Middleware func(next RawHandler) RawHandler
 // Data, or log what went wrong. Returning nil is a bug the server reports as
 // an Internal error rather than sending a malformed response.
 //
-// Components classify what they can before it arrives — DecodeParams reports
-// Invalid params, the request decoder reports a Parse or Invalid Request
-// error — so err is often already an *Error; DefaultErrorHandler passes those
-// through. Anything else is a failure no component claimed.
+// Components classify what they can before it arrives — the typed pipeline
+// reports params that do not fit P as Invalid params, the request decoder
+// reports a Parse or Invalid Request error — so err is often already an
+// *Error; DefaultErrorHandler passes those through. Anything else is a
+// failure no component claimed.
 //
 // req is the request being served, or nil when no request could be decoded.
 // It may be only partly populated when the decode itself failed. For a

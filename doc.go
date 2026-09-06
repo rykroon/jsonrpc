@@ -19,10 +19,16 @@
 // layer, so one middleware serves typed and raw methods alike.
 //
 // Server.Register runs a typed pipeline (raw bytes → P → R → raw bytes) on
-// top of RegisterRaw. Its building blocks — Raw, DecodeParams, and
-// MarshalResult — are free functions. Raw adapts a Handler into a RawHandler
-// you can hold, reuse, or wrap in Middleware — the way to run a pre-decode
-// hook (e.g. JSON schema validation) is Middleware around Raw(fn).
+// top of RegisterRaw. Raw is that pipeline as a free function: it adapts a
+// Handler into a RawHandler you can hold, reuse, or wrap in Middleware — the
+// way to run a pre-decode hook (e.g. JSON schema validation, which inspects
+// the raw params without decoding them) is Middleware around Raw(fn).
+//
+// The decode owns structural failure and nothing more: params that do not fit
+// P are Invalid params, and whether the decoded values are acceptable is the
+// Handler's judgment, returned as its own error. Validation therefore lives
+// in the Handler, next to the code that depends on it, rather than in a
+// middleware that decodes the params a second time.
 //
 // Server.ServeMessage is the byte-level entry point for transports that
 // work in raw messages (WebSocket, stdio, TCP). It handles JSON parsing,
@@ -84,13 +90,13 @@
 // jsontext-level options such as jsontext.AllowDuplicateNames also govern
 // the envelope decode, while json-level ones do not reach it: DecodeRequest
 // walks tokens and stores params as a raw jsontext.Value, so unmarshalers and
-// name matching apply only when a Handler decodes P. And DecodeParams returns
-// the zero P for omitted params without consulting any unmarshaler.
+// name matching apply only when a Handler decodes P. And omitted params yield
+// the zero P without consulting any unmarshaler.
 //
 // # Errors
 //
 // Every component that can fail returns a plain error: Handler, RawHandler,
-// RequestDecoder, DecodeParams, and MarshalResult. Returning an *Error says
+// and RequestDecoder. Returning an *Error says
 // the component classified the failure and names the code, message, and Data;
 // returning anything else leaves that decision to the server. Because the
 // return type is error, a handler or Middleware can wrap with fmt.Errorf and
@@ -159,7 +165,7 @@
 // Request.Params, Request.ID, Response.Result, and Error.Data are stored
 // as jsontext.Value because the spec leaves their types open. Decode them
 // into concrete types at the point of use; the typed helpers
-// (Server.Register, Raw, DecodeParams) do this for you.
+// (Server.Register and Raw) do this for you.
 //
 // # Not included
 //

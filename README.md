@@ -140,10 +140,11 @@ as an Internal error carrying the error's message.
 - `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream). Handles batch
   messages (JSON arrays) per the spec.
-- `Raw`, `DecodeParams`, `MarshalResult` — building blocks for the typed
-  pipeline. `Raw(fn, opts...)` turns a `Handler` into a `RawHandler` you can
-  reuse, wrap in `Middleware` (e.g. JSON schema validation with structured
-  `Error.Data`), or give its own options.
+- `Raw` — the typed pipeline as a free function. `Raw(fn, opts...)` turns a
+  `Handler` into a `RawHandler` you can reuse, wrap in `Middleware` (e.g.
+  JSON schema validation with structured `Error.Data`), or give its own
+  options. Params that do not fit `P` are reported as Invalid params;
+  whether the values are *acceptable* is the handler's call.
 - `jsonrpchttp` subpackage — `http.Handler` and `Sender` for the common
   single-request HTTP transport.
 
