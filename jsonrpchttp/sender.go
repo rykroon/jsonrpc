@@ -27,7 +27,7 @@ type Sender struct {
 }
 
 // Send implements jsonrpc.Sender.
-func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (jsonrpc.Response, error) {
+func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("jsonrpchttp: marshal request: %w", err)

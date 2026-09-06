@@ -46,7 +46,7 @@ func TestHandlerRoundTrip(t *testing.T) {
 	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", params, jsonrpc.NewID(1)))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.False(t, resp.IsError())
+	require.Nil(t, resp.Error)
 
 	var result int
 	require.NoError(t, resp.Decode(&result))
@@ -87,8 +87,8 @@ func TestHandlerReturnsMethodNotFound(t *testing.T) {
 	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("missing", nil, jsonrpc.NewID("x")))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.True(t, resp.IsError())
-	assert.Equal(t, jsonrpc.CodeMethodNotFound, resp.Error().Code)
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, jsonrpc.CodeMethodNotFound, resp.Error.Code)
 }
 
 func TestHandlerParseError(t *testing.T) {
@@ -149,8 +149,8 @@ func TestHandlerBatchRoundTrip(t *testing.T) {
 	resps, err := jsonrpc.DecodeResponses(body)
 	require.NoError(t, err)
 	require.Len(t, resps, 2)
-	assert.JSONEq(t, "2", string(resps[0].Result()))
-	assert.JSONEq(t, "11", string(resps[1].Result()))
+	assert.JSONEq(t, "2", string(resps[0].Result))
+	assert.JSONEq(t, "11", string(resps[1].Result))
 }
 
 func TestHandlerBatchAllNotificationsReturns204(t *testing.T) {

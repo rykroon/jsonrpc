@@ -69,8 +69,8 @@ func ExampleClient_Send() {
 		fmt.Println("transport error:", err)
 		return
 	}
-	if resp.IsError() {
-		fmt.Println("rpc error:", resp.Error())
+	if resp.Error != nil {
+		fmt.Println("rpc error:", resp.Error)
 		return
 	}
 	var greeting string
@@ -162,6 +162,62 @@ func ExampleServer_SetRequestDecoder() {
 		[]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`))
 	fmt.Println(string(out))
 	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"unknown member: surprise","data":{"got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
+}
+
+// ExampleServer_SetResponseEncoder replaces the response encoder to control the
+// wire form of every response the server sends. This one writes the canonical
+// members and stamps each response with a non-standard one; an encoder that
+// only wants to observe responses delegates to jsonrpc.EncodeResponse instead.
+func ExampleServer_SetResponseEncoder() {
+	s := jsonrpc.NewServer()
+	s.SetResponseEncoder(func(e *jsontext.Encoder, resp *jsonrpc.Response) error {
+		if err := e.WriteToken(jsontext.BeginObject); err != nil {
+			return err
+		}
+		if err := e.WriteToken(jsontext.String("jsonrpc")); err != nil {
+			return err
+		}
+		if err := e.WriteToken(jsontext.String(jsonrpc.Version)); err != nil {
+			return err
+		}
+		member, value := "result", resp.Result
+		if resp.Error != nil {
+			errValue, err := json.Marshal(resp.Error)
+			if err != nil {
+				return err
+			}
+			member, value = "error", errValue
+		}
+		if err := e.WriteToken(jsontext.String(member)); err != nil {
+			return err
+		}
+		if err := e.WriteValue(value); err != nil {
+			return err
+		}
+		if err := e.WriteToken(jsontext.String("id")); err != nil {
+			return err
+		}
+		if err := e.WriteValue(resp.ID); err != nil {
+			return err
+		}
+		if err := e.WriteToken(jsontext.String("server")); err != nil {
+			return err
+		}
+		if err := e.WriteToken(jsontext.String("example/1.0")); err != nil {
+			return err
+		}
+		return e.WriteToken(jsontext.EndObject)
+	})
+	s.Register("add", func(_ context.Context, p struct {
+		A, B int
+	}) (int, error) {
+		return p.A + p.B, nil
+	})
+
+	out, _ := s.ServeMessage(context.Background(),
+		[]byte(`{"jsonrpc":"2.0","method":"add","params":{"A":1,"B":2},"id":1}`))
+	fmt.Println(string(out))
+	// Output: {"jsonrpc":"2.0","result":3,"id":1,"server":"example/1.0"}
 }
 
 // ExampleServer_SetOptions installs json/v2 options every typed method decodes

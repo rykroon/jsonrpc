@@ -116,6 +116,9 @@ as an Internal error carrying the error's message.
 - `Middleware` / `Server.Use` — compose auth, logging, and validation
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params
+  marshaling, id generation, and result decoding; server errors come back
+  as `*Error`. `Client.Send` is the low-level escape hatch, round-tripping
+  a `*Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
 - `Server.SetErrorHandler` — one place to decide what every failure looks
   like on the wire: sanitize messages, remap codes, attach `Data`, log the
   cause. Also called for notification failures, which send no reply.
@@ -124,19 +127,20 @@ as an Internal error carrying the error's message.
   decoded and results encoded
 - `Server.SetRequestDecoder` — swap the request decoder to control the
   errors reported for a malformed envelope
-  marshaling, id generation, and result decoding; server errors come back
-  as `*Error`. `Client.Send` is the low-level escape hatch, round-tripping
-  a `*Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
+- `Server.SetResponseEncoder` — swap the response encoder to control the
+  wire form of every response the server sends; the default,
+  `EncodeResponse`, writes the canonical object and refuses a response
+  holding both a result and an error, or neither
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
   requests without touching `jsontext.Value` directly.
-- `Response` — an interface over the spec's two response shapes,
-  `*SuccessResponse` and `*ErrorResponse`. `Result`, `Error`, `ID`,
-  `IsSuccess`, `IsError`, and `Decode` work on either; `Decode` unmarshals a
-  successful result into a target. Both types are constructor-only, so the
-  spec's invariants hold by construction.
+- `Response` — one struct for both shapes the spec allows: exactly one of
+  `Result` and `Error` is set, and `ID` is always present. `resp.Error != nil`
+  tells the two apart, and `Decode` unmarshals a successful result into a
+  target. `NewSuccessResponse` / `NewErrorResponse` normalize an empty result
+  or id to JSON null.
 - `DecodeResponse` / `DecodeResponses` — parse a response (or a batch reply)
-  off the wire into the right concrete type; what a `Sender` implementation
-  needs, since `Response` is an interface.
+  off the wire, checking the spec's invariants; what a `Sender` implementation
+  reaches for.
 - `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream). Handles batch
   messages (JSON arrays) per the spec.

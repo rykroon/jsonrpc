@@ -81,6 +81,22 @@ func DefaultErrorHandler(_ context.Context, _ *Request, err error) *Error {
 // Server.SetRequestDecoder.
 type RequestDecoder func(d *jsontext.Decoder, req *Request) error
 
+// ResponseEncoder is the seam the server uses to write a Response, and the
+// counterpart to RequestDecoder: it decides the wire form of every response the
+// server sends.
+//
+// The signature is json.MarshalToFunc's, and the server installs an encoder as
+// exactly that: json/v2's marshaler for a *Response. An encoder must therefore
+// write exactly one JSON value to enc, and in return inherits json/v2's
+// machinery, including the options the server was given.
+//
+// An error from an encoder is not a JSON-RPC error — there is no response left
+// to report it in — so it surfaces as ServeMessage's error return.
+//
+// EncodeResponse is the package default; install another with
+// Server.SetResponseEncoder.
+type ResponseEncoder func(enc *jsontext.Encoder, resp *Response) error
+
 // chain wraps h with mw, applying mw[0] outermost.
 func chain(h RawHandler, mw []Middleware) RawHandler {
 	for i := len(mw) - 1; i >= 0; i-- {
@@ -94,14 +110,16 @@ type Server struct {
 	mu         sync.RWMutex
 	methods    map[string]RawHandler
 	middleware []Middleware
-	// decoder and userOpts are the inputs to opts, kept so either setter can
-	// rebuild it without disturbing the other.
+	// decoder, encoder and userOpts are the inputs to opts, kept so any setter
+	// can rebuild it without disturbing the others.
 	decoder      RequestDecoder
+	encoder      ResponseEncoder
 	errorHandler ErrorHandler
 	userOpts     json.Options
 	// opts is the single json.Options used for every JSON operation: the
-	// RequestDecoder rides in it as the unmarshaler for a *Request, alongside
-	// whatever SetOptions installed.
+	// RequestDecoder and ResponseEncoder ride in it as the unmarshaler for a
+	// *Request and the marshaler for a *Response, alongside whatever SetOptions
+	// installed.
 	opts json.Options
 }
 
@@ -109,29 +127,39 @@ func NewServer() *Server {
 	s := &Server{
 		methods:      map[string]RawHandler{},
 		decoder:      DecodeRequest,
+		encoder:      EncodeResponse,
 		errorHandler: DefaultErrorHandler,
 	}
 	s.rebuildOptions()
 	return s
 }
 
-// rebuildOptions derives opts from decoder and userOpts, keeping construction
-// off the request path. The caller holds mu.
+// rebuildOptions derives opts from decoder, encoder and userOpts, keeping
+// construction off the request path. The caller holds mu.
 //
 // json.JoinOptions lets a later WithUnmarshalers replace an earlier one, so the
 // user's unmarshalers are joined with the decoder's rather than layered over
-// it. The decoder comes first, so for *Request it always wins.
+// it, and the same for marshalers. The package's functions come first, so for
+// *Request and *Response they always win.
 func (s *Server) rebuildOptions() {
 	reqUnmarshaler := json.UnmarshalFromFunc(s.decoder)
+	respMarshaler := json.MarshalToFunc(s.encoder)
 	if s.userOpts == nil {
-		s.opts = json.WithUnmarshalers(reqUnmarshaler)
+		s.opts = json.JoinOptions(
+			json.WithUnmarshalers(reqUnmarshaler),
+			json.WithMarshalers(respMarshaler),
+		)
 		return
 	}
 	us := reqUnmarshaler
 	if u, ok := json.GetOption(s.userOpts, json.WithUnmarshalers); ok && u != nil {
 		us = json.JoinUnmarshalers(reqUnmarshaler, u)
 	}
-	s.opts = json.JoinOptions(s.userOpts, json.WithUnmarshalers(us))
+	ms := respMarshaler
+	if m, ok := json.GetOption(s.userOpts, json.WithMarshalers); ok && m != nil {
+		ms = json.JoinMarshalers(respMarshaler, m)
+	}
+	s.opts = json.JoinOptions(s.userOpts, json.WithUnmarshalers(us), json.WithMarshalers(ms))
 }
 
 // Use appends server-wide middleware applied to every handler, outside any
@@ -186,6 +214,26 @@ func (s *Server) SetRequestDecoder(d RequestDecoder) {
 		panic("jsonrpc: SetRequestDecoder must be called before registering methods")
 	}
 	s.decoder = d
+	s.rebuildOptions()
+}
+
+// SetResponseEncoder replaces the encoder the server uses to write responses,
+// taking control of their wire form. The default is EncodeResponse. Like Use,
+// it panics once any method is registered, or on a nil encoder.
+//
+// The encoder is installed as json/v2's marshaler for a *Response within the
+// options SetOptions manages, and outranks any marshaler for that type set
+// there.
+func (s *Server) SetResponseEncoder(e ResponseEncoder) {
+	if e == nil {
+		panic("jsonrpc: SetResponseEncoder requires a non-nil encoder")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.methods) > 0 {
+		panic("jsonrpc: SetResponseEncoder must be called before registering methods")
+	}
+	s.encoder = e
 	s.rebuildOptions()
 }
 
@@ -244,7 +292,7 @@ func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middlew
 // Serve dispatches a single request, returning nil for a notification — the
 // handler still runs, but no reply is produced. Panics in handlers are not
 // recovered; wrap Serve if your transport needs that.
-func (s *Server) Serve(ctx context.Context, req *Request) Response {
+func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	// Validate the id first so later error responses never echo an invalid one.
 	if !req.IsNotification() && !isValidID(req.ID) {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, "id must be a string, number, or null")), nil)
@@ -309,7 +357,7 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	if resp == nil {
 		return nil, nil
 	}
-	return json.Marshal(resp, s.options())
+	return marshalResponse(resp, s.options())
 }
 
 // serveBatch dispatches a batch sequentially. Each element is decoded
@@ -325,7 +373,7 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	if len(elems) == 0 {
 		return s.marshalMessageError(s.handleError(ctx, nil, NewError(CodeInvalidRequest, "empty batch")), nil)
 	}
-	responses := make([]Response, 0, len(elems))
+	responses := make([]*Response, 0, len(elems))
 	for _, elem := range elems {
 		var req Request
 		if err := s.decode(elem, &req); err != nil {
@@ -340,7 +388,7 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	if len(responses) == 0 {
 		return nil, nil // all notifications: no reply at all, not an empty array
 	}
-	return json.Marshal(responses, opts)
+	return marshalResponse(responses, opts)
 }
 
 // options returns the server's current json.Options.
@@ -502,5 +550,16 @@ func isValidID(id jsontext.Value) bool {
 // marshalMessageError writes the error response ServeMessage produces when a
 // message never reaches Serve.
 func (s *Server) marshalMessageError(e *Error, id jsontext.Value) (jsontext.Value, error) {
-	return json.Marshal(NewErrorResponse(e, id), s.options())
+	return marshalResponse(NewErrorResponse(e, id), s.options())
+}
+
+// marshalResponse writes one response, or a batch of them, under opts. A
+// failure yields no bytes at all rather than json.Marshal's partial buffer:
+// there is nothing usable to send, and the caller reports the error instead.
+func marshalResponse(v any, opts json.Options) (jsontext.Value, error) {
+	out, err := json.Marshal(v, opts)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

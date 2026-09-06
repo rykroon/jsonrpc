@@ -32,7 +32,7 @@
 // dispatched per element. HTTP adapters that prefer parse failures as HTTP 400
 // should call Serve directly instead.
 //
-// # Decoding
+// # Decoding and encoding
 //
 // Turning a message into a Request is a seam: a RequestDecoder, which has
 // json.UnmarshalFromFunc's signature. The default, DecodeRequest, walks the
@@ -59,6 +59,16 @@
 // dispatches (id shape, "2.0" version, non-empty method), since transports may
 // build a Request without decoding one.
 //
+// Writing a Response is the mirror seam: a ResponseEncoder, which has
+// json.MarshalToFunc's signature and is installed with
+// Server.SetResponseEncoder. The default, EncodeResponse, writes the canonical
+// object — the version from Version, then result or error, then id — and
+// reports a response holding both members or neither rather than sending it. A
+// custom encoder decides the wire form of every response the server sends, and
+// can delegate to EncodeResponse. Its errors are not JSON-RPC errors: there is
+// no response left to carry one, so they surface as ServeMessage's error
+// return.
+//
 // # Options
 //
 // The server does all of its JSON work under one json.Options value installed
@@ -70,9 +80,10 @@
 // like Use, must run before any method is registered; for a single method, use
 // Raw(fn, opts) with RegisterRaw.
 //
-// The RequestDecoder rides in the same options as the unmarshaler for
-// *Request, outranking any unmarshaler for that type set through SetOptions.
-// Sharing one policy has two consequences: jsontext-level options such as
+// The RequestDecoder and ResponseEncoder ride in the same options, as the
+// unmarshaler for *Request and the marshaler for *Response, outranking anything
+// set for those types through SetOptions. Sharing one policy has two
+// consequences: jsontext-level options such as
 // jsontext.AllowDuplicateNames govern the envelope decode while json-level
 // ones do not (DecodeRequest walks tokens and stores params raw), and omitted
 // params yield the zero P without consulting any unmarshaler.
@@ -113,25 +124,26 @@
 // returning server-reported errors as *Error; Client.Notify sends a
 // notification. For full control, build a Request with NewRequest or
 // NewNotification (with NewID and NewParams for the polymorphic fields),
-// round-trip it with Client.Send, then check Response.IsError and decode with
+// round-trip it with Client.Send, then check Response.Error and decode with
 // Response.Decode.
 //
 // # Responses
 //
-// Response is an interface with exactly two implementations, matching the two
-// shapes the spec allows: *SuccessResponse and *ErrorResponse. Its accessors —
-// Result, Error, ID, IsSuccess, IsError, Decode — let callers work with either
-// without a type switch.
+// Response is one struct covering both shapes the spec allows: exactly one of
+// Result and Error is set, and ID is always present. Which shape a response has
+// is the Error field — nil on a success — so callers read fields rather than
+// ask an interface.
 //
-// Both types keep their fields unexported and write themselves with
-// MarshalJSONTo, so a response can only be built by NewSuccessResponse,
-// NewErrorResponse, or DecodeResponse. The spec's invariants therefore hold by
-// construction, and a malformed response fails to marshal rather than reaching
-// the wire.
+// NewSuccessResponse and NewErrorResponse build one, normalizing an empty
+// result or id to JSON null. A Response written by hand can still hold a shape
+// the spec forbids, so its MarshalJSONTo — EncodeResponse under another name —
+// reports one holding both members or neither instead of sending it. That check
+// runs under both json packages, and a Server applies its ResponseEncoder in
+// place of it.
 //
-// Because Response is an interface it cannot be unmarshaled into.
-// DecodeResponse turns one response object into the right concrete type, and
-// DecodeResponses does the same for a batch reply.
+// DecodeResponse parses one response object and checks the same invariants
+// coming the other way; DecodeResponses does it for a batch reply. Plain
+// json.Unmarshal into a Response works too, unchecked.
 //
 // # Polymorphic fields
 //
