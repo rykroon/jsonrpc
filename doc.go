@@ -8,6 +8,8 @@
 //     — under a method name. This is the normal way to write a method.
 //   - Server.RegisterRaw installs a RawHandler, which works in raw params and
 //     result bytes, for the cases where a method wants that control.
+//   - Server.SetErrorHandler decides what every failure looks like on the
+//     wire.
 //   - Server.Serve(ctx, *Request) Response dispatches a single decoded
 //     Request; returns nil for notifications.
 //
@@ -47,9 +49,10 @@
 //
 // Server.SetRequestDecoder installs a different one, which is how a caller
 // takes control of the errors reported for a malformed or non-conforming
-// envelope: returning an *Error from a decoder surfaces it verbatim, while
-// any other error is classified as a Parse error or an Invalid Request. A
-// custom decoder can delegate to DecodeRequest and adjust the result.
+// envelope: returning an *Error from a decoder chooses the code, message, and
+// Data, while any other error is classified as a Parse error or an Invalid
+// Request. Either way the server's ErrorHandler has the final say. A custom
+// decoder can delegate to DecodeRequest and adjust the result.
 //
 // A custom decoder is installed as json/v2's unmarshaler for a *Request, so
 // it reads exactly one JSON value from the decoder it is handed — one that
@@ -83,6 +86,38 @@
 // walks tokens and stores params as a raw jsontext.Value, so unmarshalers and
 // name matching apply only when a Handler decodes P. And DecodeParams returns
 // the zero P for omitted params without consulting any unmarshaler.
+//
+// # Errors
+//
+// Every component that can fail returns a plain error: Handler, RawHandler,
+// RequestDecoder, DecodeParams, and MarshalResult. Returning an *Error says
+// the component classified the failure and names the code, message, and Data;
+// returning anything else leaves that decision to the server. Because the
+// return type is error, a handler or Middleware can wrap with fmt.Errorf and
+// %w, and the context survives all the way out.
+//
+// Server.SetErrorHandler installs the ErrorHandler that turns each of those
+// errors into the *Error sent to the client. It is called for every failure
+// the server reports — a failed decode, a handler's error, and the protocol
+// failures Serve detects itself — and for a notification too, where its
+// *Error is discarded but the failure can still be logged rather than lost.
+// One function therefore decides every error object the server emits.
+//
+// The default, DefaultErrorHandler, sends an *Error verbatim and turns
+// anything else into an Internal error carrying the error's message. That
+// last part reports an unclassified failure's text to the client, so a server
+// that must not leak internals installs a handler that logs err and returns a
+// fixed *Error:
+//
+//	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) *Error {
+//		if e, ok := errors.AsType[*jsonrpc.Error](err); ok && e != nil {
+//			return e // a classified failure is already client-safe
+//		}
+//		log.Printf("rpc %s: %v", req.Method, err)
+//		return jsonrpc.NewError(jsonrpc.CodeInternalError, "internal error")
+//	})
+//
+// # Client
 //
 // Client wraps a Sender — a function that round-trips a Request to a
 // Response across some transport. Server.Sender adapts a Server into a

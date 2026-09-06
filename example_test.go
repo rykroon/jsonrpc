@@ -87,7 +87,7 @@ func ExampleMiddleware() {
 	// parameter or result types. The returned func literal converts to
 	// RawHandler automatically — no cast needed.
 	logging := func(next jsonrpc.RawHandler) jsonrpc.RawHandler {
-		return func(ctx context.Context, params jsontext.Value) (jsontext.Value, *jsonrpc.Error) {
+		return func(ctx context.Context, params jsontext.Value) (jsontext.Value, error) {
 			fmt.Printf("calling with params: %s\n", params)
 			return next(ctx, params)
 		}
@@ -189,4 +189,28 @@ func ExampleServer_SetOptions() {
 	out, _ := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"epoch","id":1}`))
 	fmt.Println(string(out))
 	// Output: {"jsonrpc":"2.0","result":{"at":1257894000},"id":1}
+}
+
+// ExampleServer_SetErrorHandler keeps an unclassified failure's detail off the
+// wire. Errors the library classified — a bad envelope, undecodable params —
+// arrive as *jsonrpc.Error and are already safe to send; anything else is the
+// handler's own error, reported to the client as a fixed message.
+func ExampleServer_SetErrorHandler() {
+	s := jsonrpc.NewServer()
+	s.SetErrorHandler(func(_ context.Context, req *jsonrpc.Request, err error) *jsonrpc.Error {
+		if e, ok := errors.AsType[*jsonrpc.Error](err); ok && e != nil {
+			return e
+		}
+		fmt.Printf("log: rpc %s failed: %v\n", req.Method, err)
+		return jsonrpc.NewError(jsonrpc.CodeInternalError, "internal error")
+	})
+	s.Register("lookup", func(_ context.Context, _ struct{}) (string, error) {
+		return "", errors.New("dial postgres://user:hunter2@db: connection refused")
+	})
+
+	out, _ := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"lookup","id":1}`))
+	fmt.Println(string(out))
+	// Output:
+	// log: rpc lookup failed: dial postgres://user:hunter2@db: connection refused
+	// {"jsonrpc":"2.0","error":{"code":-32603,"message":"internal error"},"id":1}
 }

@@ -49,9 +49,13 @@ handlers without touching the typed pipeline:
 ```go
 // logging knows nothing about any handler's param or result types.
 func logging(next jsonrpc.RawHandler) jsonrpc.RawHandler {
-    return func(ctx context.Context, params jsontext.Value) (jsontext.Value, *jsonrpc.Error) {
+    return func(ctx context.Context, params jsontext.Value) (jsontext.Value, error) {
         log.Printf("rpc params: %s", params)
-        return next(ctx, params)
+        out, err := next(ctx, params)
+        if err != nil {
+            return nil, fmt.Errorf("rpc: %w", err) // wrapping survives to the ErrorHandler
+        }
+        return out, nil
     }
 }
 
@@ -85,6 +89,25 @@ s.Register("epoch", epoch) // any time.Time in epoch's result uses the marshaler
 `SetOptions` must be called before registering methods. To give one method
 its own options, adapt it yourself: `s.RegisterRaw("m", jsonrpc.Raw(fn, opts))`.
 
+## Errors
+
+Everything that can fail returns a plain `error`. Returning a `*jsonrpc.Error`
+says you classified the failure yourself; anything else leaves that to the
+server, so handlers and middleware can wrap freely with `%w`:
+
+```go
+s.SetErrorHandler(func(ctx context.Context, req *jsonrpc.Request, err error) *jsonrpc.Error {
+    if e, ok := errors.AsType[*jsonrpc.Error](err); ok && e != nil {
+        return e // already client-safe
+    }
+    log.Printf("rpc %s: %v", req.Method, err) // keep the detail off the wire
+    return jsonrpc.NewError(jsonrpc.CodeInternalError, "internal error")
+})
+```
+
+The default sends `*Error` values through untouched and reports anything else
+as an Internal error carrying the error's message.
+
 ## What it gives you
 
 - `Server` — a method registry. `Register` installs a `Handler`
@@ -93,6 +116,9 @@ its own options, adapt it yourself: `s.RegisterRaw("m", jsonrpc.Raw(fn, opts))`.
 - `Middleware` / `Server.Use` — compose auth, logging, and validation
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params
+- `Server.SetErrorHandler` — one place to decide what every failure looks
+  like on the wire: sanitize messages, remap codes, attach `Data`, log the
+  cause. Also called for notification failures, which send no reply.
 - `Server.SetOptions` — install json/v2 options (e.g. `json.WithMarshalers`,
   `json.WithUnmarshalers`) that control how every method's params are
   decoded and results encoded

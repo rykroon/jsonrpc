@@ -152,7 +152,7 @@ func TestNotificationUnknownMethodProducesNoResponse(t *testing.T) {
 
 func TestNilResultEncodesAsNull(t *testing.T) {
 	s := NewServer()
-	s.RegisterRaw("void", func(_ context.Context, _ jsontext.Value) (jsontext.Value, *Error) {
+	s.RegisterRaw("void", func(_ context.Context, _ jsontext.Value) (jsontext.Value, error) {
 		return nil, nil
 	})
 
@@ -703,7 +703,7 @@ func TestRawWithValidationMiddleware(t *testing.T) {
 	// Pre-decode validation middleware owns the full *Error including
 	// structured Data, then delegates to the typed handler.
 	requirePositive := func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
+		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, NewError(CodeInvalidParams, err.Error())
@@ -744,7 +744,7 @@ func TestRawWithValidationMiddleware(t *testing.T) {
 // letting tests assert ordering of the wrapping.
 func tagMiddleware(name string, log *[]string) Middleware {
 	return func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
+		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
 			*log = append(*log, name)
 			return next(ctx, raw)
 		}
@@ -755,7 +755,7 @@ func TestRegisterMiddlewareValidatesBeforeDecode(t *testing.T) {
 	s := NewServer()
 	// A raw middleware that rejects without ever decoding into the typed P.
 	requirePositive := func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, *Error) {
+		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
 			var p addParams
 			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, NewError(CodeInvalidParams, err.Error())
@@ -988,7 +988,7 @@ func TestDefaultDecoderOmittedParams(t *testing.T) {
 	s := NewServer()
 	var seen jsontext.Value
 	called := false
-	s.RegisterRaw("probe", func(_ context.Context, params jsontext.Value) (jsontext.Value, *Error) {
+	s.RegisterRaw("probe", func(_ context.Context, params jsontext.Value) (jsontext.Value, error) {
 		seen, called = params, true
 		return jsontext.Value(`"ok"`), nil
 	})
@@ -1414,4 +1414,207 @@ func TestRawWithOptions(t *testing.T) {
 
 	code, _, _ := decodeError(t, s, `{"jsonrpc":"2.0","method":"numbers","params":{"t":"21.5C"},"id":2}`)
 	require.Equal(t, CodeInvalidParams, code)
+}
+
+// errDBUnavailable stands in for an application sentinel a handler wraps and
+// an ErrorHandler recognizes.
+var errDBUnavailable = errors.New("db unavailable")
+
+func TestSetErrorHandlerSanitizesUnclassifiedErrors(t *testing.T) {
+	var logged error
+	s := NewServer()
+	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) *Error {
+		if e, ok := errors.AsType[*Error](err); ok && e != nil {
+			return e
+		}
+		logged = err
+		return NewError(CodeServerError, "internal error")
+	})
+	s.Register("boom", func(context.Context, struct{}) (any, error) {
+		return nil, errors.New("dial postgres://user:hunter2@db: refused")
+	})
+
+	resp := s.Serve(context.Background(), NewRequest("boom", nil, NewID(1)))
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeServerError, resp.Error().Code)
+	// The detail stayed with the operator instead of going to the client.
+	require.Equal(t, "internal error", resp.Error().Message)
+	require.EqualError(t, logged, "dial postgres://user:hunter2@db: refused")
+}
+
+func TestErrorHandlerSeesClassifiedErrors(t *testing.T) {
+	// An *Error a component raised still reaches the handler, so a verbose
+	// json/v2 message can be replaced.
+	s := NewServer()
+	s.SetErrorHandler(func(_ context.Context, _ *Request, err error) *Error {
+		e, ok := errors.AsType[*Error](err)
+		require.True(t, ok, "expected the component's *Error, got %T", err)
+		return NewError(e.Code, "invalid params")
+	})
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
+	})
+
+	code, msg, _ := decodeError(t, s, `{"jsonrpc":"2.0","method":"add","params":{"a":"x"},"id":1}`)
+	require.Equal(t, CodeInvalidParams, code)
+	require.Equal(t, "invalid params", msg)
+}
+
+func TestErrorHandlerReceivesRequest(t *testing.T) {
+	var gotMethod string
+	var gotID jsontext.Value
+	s := NewServer()
+	s.SetErrorHandler(func(_ context.Context, req *Request, err error) *Error {
+		gotMethod, gotID = req.Method, req.ID
+		return DefaultErrorHandler(context.Background(), req, err)
+	})
+	s.Register("boom", func(context.Context, struct{}) (any, error) {
+		return nil, errors.New("boom")
+	})
+
+	s.Serve(context.Background(), NewRequest("boom", nil, NewID(7)))
+	require.Equal(t, "boom", gotMethod)
+	require.JSONEq(t, "7", string(gotID))
+}
+
+func TestErrorHandlerObservesNotificationFailure(t *testing.T) {
+	var seen error
+	var wasNotification bool
+	s := NewServer()
+	s.SetErrorHandler(func(_ context.Context, req *Request, err error) *Error {
+		seen, wasNotification = err, req.IsNotification()
+		return NewError(CodeInternalError, "unused")
+	})
+	s.Register("boom", func(context.Context, struct{}) (any, error) {
+		return nil, errors.New("boom")
+	})
+
+	// The spec allows no reply, but the failure is no longer silent.
+	require.Nil(t, s.Serve(context.Background(), NewNotification("boom", nil)))
+	require.EqualError(t, seen, "boom")
+	require.True(t, wasNotification)
+}
+
+func TestErrorHandlerCoversDecodePath(t *testing.T) {
+	t.Run("envelope decode", func(t *testing.T) {
+		var got *Request
+		s := NewServer()
+		s.SetErrorHandler(func(_ context.Context, req *Request, err error) *Error {
+			got = req
+			return NewError(CodeServerError, "rejected")
+		})
+		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+			return addResult{Sum: p.A + p.B}, nil
+		})
+
+		// id precedes the offending member, so the decoder had read it before
+		// it failed and the handler sees it.
+		code, msg, _ := decodeError(t, s, `{"jsonrpc":"2.0","id":1,"method":"add","surprise":true}`)
+		require.Equal(t, CodeServerError, code)
+		require.Equal(t, "rejected", msg)
+		require.NotNil(t, got)
+		require.Equal(t, "add", got.Method)
+		require.JSONEq(t, "1", string(got.ID))
+	})
+
+	t.Run("batch-level failure passes a nil request", func(t *testing.T) {
+		var called bool
+		s := NewServer()
+		s.SetErrorHandler(func(_ context.Context, req *Request, err error) *Error {
+			called = true
+			require.Nil(t, req, "no request could be decoded")
+			return NewError(CodeServerError, "rejected")
+		})
+		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+			return addResult{Sum: p.A + p.B}, nil
+		})
+
+		code, _, _ := decodeError(t, s, `[]`)
+		require.True(t, called)
+		require.Equal(t, CodeServerError, code)
+	})
+}
+
+func TestMiddlewareCanWrapErrors(t *testing.T) {
+	// Wrapping is what a plain error return buys: the middleware adds context
+	// with %w and the ErrorHandler still recognizes the sentinel underneath.
+	s := NewServer()
+	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) *Error {
+		if errors.Is(err, errDBUnavailable) {
+			return NewError(CodeServerError, "service unavailable").
+				MustSetData(map[string]string{"detail": err.Error()})
+		}
+		return DefaultErrorHandler(ctx, req, err)
+	})
+	s.Use(func(next RawHandler) RawHandler {
+		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
+			out, err := next(ctx, raw)
+			if err != nil {
+				return nil, fmt.Errorf("lookup: %w", err)
+			}
+			return out, nil
+		}
+	})
+	s.Register("lookup", func(context.Context, struct{}) (any, error) {
+		return nil, fmt.Errorf("query users: %w", errDBUnavailable)
+	})
+
+	resp := s.Serve(context.Background(), NewRequest("lookup", nil, NewID(1)))
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeServerError, resp.Error().Code)
+	require.Equal(t, "service unavailable", resp.Error().Message)
+	var data struct {
+		Detail string `json:"detail"`
+	}
+	require.NoError(t, resp.Error().UnmarshalData(&data))
+	require.Equal(t, "lookup: query users: db unavailable", data.Detail)
+}
+
+func TestErrorHandlerNilResultIsInternalError(t *testing.T) {
+	s := NewServer()
+	s.SetErrorHandler(func(context.Context, *Request, error) *Error { return nil })
+	s.Register("boom", func(context.Context, struct{}) (any, error) {
+		return nil, errors.New("boom")
+	})
+
+	// A nil from the handler must not produce a response with no error object.
+	resp := s.Serve(context.Background(), NewRequest("boom", nil, NewID(1)))
+	require.NotNil(t, resp.Error())
+	require.Equal(t, CodeInternalError, resp.Error().Code)
+}
+
+func TestDefaultErrorHandlerTypedNil(t *testing.T) {
+	e := DefaultErrorHandler(context.Background(), nil, (*Error)(nil))
+	require.NotNil(t, e)
+	require.Equal(t, CodeInternalError, e.Code)
+}
+
+func TestDecoderTypedNilErrorDoesNotPanic(t *testing.T) {
+	// A decoder returning a typed-nil *Error once reached err.Error() on a nil
+	// receiver.
+	s := NewServer()
+	s.SetRequestDecoder(func(d *jsontext.Decoder, _ *Request) error {
+		d.SkipValue()
+		return (*Error)(nil)
+	})
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
+	})
+
+	code, _, _ := decodeError(t, s, `{"jsonrpc":"2.0","method":"add","id":1}`)
+	require.Equal(t, CodeInvalidRequest, code)
+}
+
+func TestSetErrorHandlerPanics(t *testing.T) {
+	t.Run("nil handler", func(t *testing.T) {
+		s := NewServer()
+		require.Panics(t, func() { s.SetErrorHandler(nil) })
+	})
+
+	t.Run("after a method is registered", func(t *testing.T) {
+		s := newTestServer(t)
+		require.Panics(t, func() {
+			s.SetErrorHandler(func(context.Context, *Request, error) *Error { return nil })
+		})
+	})
 }
