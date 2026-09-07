@@ -7,14 +7,10 @@ import (
 	"fmt"
 )
 
-// Response is a JSON-RPC 2.0 response; exactly one of Result and Error is set.
-// ID is always present, and is JSON null when the request id could not be
-// determined. Result stays raw because the spec leaves its type open; decode it
-// with Decode.
-//
-// MarshalJSONTo writes it and UnmarshalJSONFrom reads it, so a response the
-// spec forbids never reaches the wire. Both walk the object themselves; the
-// struct tags only record the wire names.
+// Response is a JSON-RPC 2.0 response: exactly one of Result and Error is set,
+// and ID is always present, JSON null when the request id could not be read.
+// MarshalJSONTo and UnmarshalJSONFrom walk the object themselves, so a shape
+// the spec forbids never crosses the wire; the struct tags only record names.
 type Response struct {
 	JSONRPC string         `json:"jsonrpc"`
 	Result  jsontext.Value `json:"result,omitzero"`
@@ -27,8 +23,7 @@ var (
 	_ json.UnmarshalerFrom = (*Response)(nil)
 )
 
-// NewSuccessResponse assembles a Response carrying a result. An empty result or
-// id becomes JSON null, since the spec requires both members.
+// NewSuccessResponse builds a Response; an empty result or id becomes null.
 func NewSuccessResponse(result, id jsontext.Value) *Response {
 	if len(result) == 0 {
 		result = jsontext.Value("null")
@@ -39,8 +34,7 @@ func NewSuccessResponse(result, id jsontext.Value) *Response {
 	return &Response{JSONRPC: Version, Result: result, ID: id}
 }
 
-// NewErrorResponse assembles a Response carrying an error object. An empty id
-// becomes JSON null, as the spec requires when the request id could not be read.
+// NewErrorResponse builds a Response; an empty id becomes null.
 func NewErrorResponse(err *Error, id jsontext.Value) *Response {
 	if len(id) == 0 {
 		id = jsontext.Value("null")
@@ -48,8 +42,7 @@ func NewErrorResponse(err *Error, id jsontext.Value) *Response {
 	return &Response{JSONRPC: Version, Error: err, ID: id}
 }
 
-// Decode unmarshals r.Result into into, doing nothing when into is nil or
-// Result is empty. Check r.Error first.
+// Decode unmarshals r.Result into into. Check r.Error first.
 func (r Response) Decode(into any) error {
 	if into == nil || len(r.Result) == 0 {
 		return nil
@@ -57,15 +50,9 @@ func (r Response) Decode(into any) error {
 	return json.Unmarshal(r.Result, into)
 }
 
-// MarshalJSONTo writes the response as tokens rather than through the struct
-// tags, so the shape is the spec's regardless of what the fields hold: the
-// version is always Version, the members are ordered, and an empty id is
-// written as JSON null. A marshaler for *Response in a Server's options
-// overrides this, and can delegate here.
-//
-// Exactly one of Result and Error must be set — a response with both or with
-// neither is a bug, and is reported here instead of being sent. WriteValue
-// likewise rejects a malformed raw result.
+// MarshalJSONTo writes the canonical object — Version, result or error, id —
+// and reports a response holding both members or neither instead of sending
+// it. A marshaler for *Response in a Server's options overrides this.
 func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 	switch {
 	case r.Error != nil && len(r.Result) > 0:
@@ -87,8 +74,7 @@ func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 		if err := enc.WriteToken(jsontext.String("error")); err != nil {
 			return err
 		}
-		// The error object is a struct, so it is handed to MarshalEncode
-		// mid-stream, inheriting whatever options enc carries.
+		// A struct, so MarshalEncode takes it mid-stream with enc's options.
 		if err := json.MarshalEncode(enc, r.Error); err != nil {
 			return err
 		}
@@ -113,19 +99,12 @@ func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return enc.WriteToken(jsontext.EndObject)
 }
 
-// UnmarshalJSONFrom decodes one response object and checks what the spec
-// requires: the version is "2.0", an id is present, and exactly one of result
-// and error is set. It applies to every json.Unmarshal of a Response, so a
-// Sender gets the checks for free.
-//
-// Undefined members are skipped, so a decorated response still interoperates;
-// duplicate member names are rejected. A failed check leaves the receiver
-// zeroed, never holding a shape the spec forbids.
-//
-// Use DecodeResponses for a batch reply.
+// UnmarshalJSONFrom decodes one response object, checking the version, the
+// presence of an id, and that exactly one of result and error is set.
+// Undefined members are skipped; duplicates are rejected. A failed check
+// leaves the receiver zeroed. Use DecodeResponses for a batch reply.
 func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
-	// json/v2 does not zero the destination, so a member this message omits
-	// must not survive from a previous one.
+	// json/v2 does not zero the destination.
 	*r = Response{}
 
 	tok, err := d.ReadToken()
@@ -136,16 +115,14 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 		return errors.New("jsonrpc: response must be a JSON object")
 	}
 
-	// The local replaces the receiver only once the checks pass, so a rejected
-	// message never leaves r holding both a result and an error.
+	// The receiver is replaced only once the checks pass.
 	var resp Response
 	for d.PeekKind() != jsontext.KindEndObject {
 		tok, err := d.ReadToken()
 		if err != nil {
 			return decodeResponseError(err)
 		}
-		// Token.String allocates, so the name stays valid across the reads
-		// below; the Token itself does not.
+		// Token.String allocates; the Token itself dies at the next read.
 		switch name := tok.String(); name {
 		case "jsonrpc":
 			tok, err := d.ReadToken()
@@ -162,14 +139,12 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			if err != nil {
 				return decodeResponseError(err)
 			}
-			// ReadValue's buffer dies at the next read. Raw also keeps a
-			// present "result":null, a legal success, distinct from an absent
-			// member: four bytes against nil.
+			// ReadValue's buffer dies at the next read. Raw also keeps a present
+			// "result":null distinct from an absent member.
 			resp.Result = jsontext.Value(val.Clone())
 
 		case "error":
-			// A struct, so UnmarshalDecode takes it mid-stream, inheriting
-			// whatever options d carries.
+			// A struct, so UnmarshalDecode takes it mid-stream with d's options.
 			if err := json.UnmarshalDecode(d, &resp.Error); err != nil {
 				return decodeResponseError(err)
 			}
@@ -188,7 +163,7 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 		}
 	}
 
-	// Consume the closing brace, completing the one value this decoder reads.
+	// Consume the closing brace.
 	if _, err := d.ReadToken(); err != nil {
 		return decodeResponseError(err)
 	}
@@ -209,15 +184,14 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	return nil
 }
 
-// decodeResponseError wraps a decode failure. These stay plain errors, unlike
-// the request side's: a malformed reply has no one to report a spec code to.
+// decodeResponseError stays a plain error: a malformed reply has no one to
+// report a spec code to.
 func decodeResponseError(err error) error {
 	return fmt.Errorf("jsonrpc: decode response: %w", err)
 }
 
-// DecodeResponses parses a batch reply — a JSON array of response objects —
-// element by element, so each gets Response.UnmarshalJSONFrom's checks. A reply
-// to a single request is a plain json.Unmarshal into a Response.
+// DecodeResponses parses a batch reply element by element, giving each
+// Response.UnmarshalJSONFrom's checks.
 func DecodeResponses(data jsontext.Value) ([]*Response, error) {
 	var elems []jsontext.Value
 	if err := json.Unmarshal(data, &elems); err != nil {

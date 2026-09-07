@@ -10,8 +10,6 @@ import (
 const Version = "2.0"
 
 // Request is a JSON-RPC 2.0 request, or a notification when len(ID) == 0.
-// Params and ID stay raw because the spec leaves their types open; decode them
-// at the point of use.
 type Request struct {
 	JSONRPC string         `json:"jsonrpc"`
 	Method  string         `json:"method"`
@@ -25,25 +23,14 @@ func (r *Request) IsNotification() bool {
 	return len(r.ID) == 0
 }
 
-// UnmarshalJSONFrom decodes one request object, walking it token by token so
-// every rejection carries a message this package wrote rather than one from the
-// JSON library: an unrecognized envelope member, a non-string method, or
-// non-structured params are Invalid Request, while malformed input is a Parse
-// error. An unmarshaler for *Request in a Server's options overrides this,
-// and can delegate here.
+// UnmarshalJSONFrom decodes one request object token by token, so every
+// rejection carries this package's message: an unknown envelope member, a
+// non-string method, non-structured params (null included), or a duplicate
+// member name anywhere is Invalid Request; malformed input is a Parse error.
+// Params content is not otherwise validated. A missing method or wrong
+// version is Serve's verdict, so an id read before the failure survives.
 //
-// Duplicate member names are rejected anywhere, including inside params, since
-// detection is tokenizer-level. Params content is otherwise not validated, so
-// unknown members inside it are the handler's concern. Per the spec params must
-// be an object or array whenever present, so null is rejected like any other
-// scalar; a request with no parameters omits the member.
-//
-// Required members are not checked here: Serve rejects a missing method or
-// wrong version on every path.
-//
-// The reset is because json/v2 does not zero the destination: a stale id would
-// make a notification look like a request. Members then fill in place, so a
-// failure partway through keeps the id Serve needs to attribute an error to.
+// The receiver is reset first because json/v2 does not zero the destination.
 func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	*req = Request{}
 
@@ -60,8 +47,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 		if err != nil {
 			return tokenError(err)
 		}
-		// Token.String allocates, so the name stays valid across the reads
-		// below; the Token itself does not.
+		// Token.String allocates; the Token itself dies at the next read.
 		switch name := tok.String(); name {
 		case "jsonrpc":
 			tok, err := d.ReadToken()
@@ -71,8 +57,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			if tok.Kind() != jsontext.KindString {
 				return NewError(CodeInvalidRequest, "jsonrpc must be a string")
 			}
-			// Whether the version is "2.0" is Serve's verdict: failing here
-			// would discard an id we can still read.
+			// Serve judges the version; failing here would discard the id.
 			req.JSONRPC = tok.String()
 
 		case "method":
@@ -95,8 +80,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 				// ReadValue's buffer is only valid until the next read.
 				req.Params = jsontext.Value(val.Clone())
 			default:
-				// Including null: the member is present but unstructured.
-				// Omit params entirely to send none.
+				// null is present but unstructured; omit params to send none.
 				return NewError(CodeInvalidRequest, "params must be an object or array")
 			}
 
@@ -112,16 +96,14 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 		}
 	}
 
-	// Consume the closing brace, completing the one value this decoder reads.
+	// Consume the closing brace.
 	if _, err := d.ReadToken(); err != nil {
 		return tokenError(err)
 	}
 	return nil
 }
 
-// tokenError maps a tokenizer failure to the spec's codes: a duplicate member
-// name is well-formed JSON violating uniqueness (Invalid Request), anything
-// else is malformed input (Parse error).
+// tokenError: a duplicate name is Invalid Request, anything else a Parse error.
 func tokenError(err error) *Error {
 	if errors.Is(err, jsontext.ErrDuplicateName) {
 		return NewError(CodeInvalidRequest, err.Error())
@@ -129,27 +111,24 @@ func tokenError(err error) *Error {
 	return NewError(CodeParseError, err.Error())
 }
 
-// NewRequest assembles a Request. Params and id are raw JSON; build them with
-// NewParams and NewID. For a notification, use NewNotification.
+// NewRequest assembles a Request; see NewParams and NewID.
 func NewRequest(method string, params, id jsontext.Value) *Request {
 	return &Request{JSONRPC: Version, Method: method, Params: params, ID: id}
 }
 
-// NewNotification assembles a Request without an id, so the server sends no
-// response.
+// NewNotification assembles a Request without an id.
 func NewNotification(method string, params jsontext.Value) *Request {
 	return &Request{JSONRPC: Version, Method: method, Params: params}
 }
 
-// NewID returns the JSON encoding of v for use as Request.ID. The constraint
-// matches the spec-allowed id shapes; marshal other types directly.
+// NewID returns the JSON encoding of v for Request.ID.
 func NewID[T ~string | ~int | ~int64 | ~uint64](v T) jsontext.Value {
 	b, _ := json.Marshal(v)
 	return b
 }
 
-// NewParams marshals v for use as Request.Params. A nil v returns nil; a
-// jsontext.Value passes through unchanged.
+// NewParams marshals v for Request.Params. A nil v returns nil; a
+// jsontext.Value passes through.
 func NewParams(v any) (jsontext.Value, error) {
 	if v == nil {
 		return nil, nil

@@ -9,49 +9,32 @@ import (
 	"sync"
 )
 
-// Handler is a method implementation: it receives the decoded params P and
-// returns a result R or an error. Server.Register installs one; Raw adapts one
-// into a RawHandler.
+// Handler is a typed method: decoded params P in, result R or an error out.
 type Handler[P, R any] func(context.Context, P) (R, error)
 
-// RawHandler is the low-level dispatch contract: it takes the raw params bytes
-// (possibly empty) and returns result bytes or an error. A nil result with a
-// nil error encodes as `"result":null`. A method value satisfies it without a
-// cast, so stateful methods need no wrapper.
+// RawHandler is the dispatch contract: raw params bytes (possibly empty) in,
+// result bytes or an error out. A nil result encodes as `"result":null`.
 //
-// Returning an *Error classifies the failure and is sent as-is; any other error
-// is left to the server's ErrorHandler, so handlers and Middleware can wrap
-// with fmt.Errorf and %w.
+// An *Error is sent as-is; any other error goes to the ErrorHandler, so
+// wrapping with %w is fine.
 type RawHandler func(ctx context.Context, params jsontext.Value) (jsontext.Value, error)
 
-// Middleware wraps a RawHandler to add cross-cutting behavior. It operates on
-// the raw layer, so it composes with typed and raw handlers alike. mw[0] is
-// outermost.
+// Middleware wraps a RawHandler. mw[0] is outermost.
 type Middleware func(next RawHandler) RawHandler
 
-// ErrorHandler has the last word on every error the server turns into a
-// response: a failed decode, a handler's error, and the protocol failures
-// Serve detects itself. It is the one place to sanitize messages, remap codes,
-// attach Data, or log. Returning nil is a bug the server reports as an
-// Internal error.
+// ErrorHandler turns every error the server reports — a failed decode, a
+// handler's error, a protocol failure Serve detects — into the *Error sent
+// back. Returning nil is a bug, reported as an Internal error.
 //
-// err is often already an *Error, since components classify what they can
-// (params that do not fit P are Invalid params, a bad envelope is a Parse or
-// Invalid Request error); anything else is a failure no component claimed.
-//
-// req is the request being served, or nil when none could be decoded; it may
-// be only partly populated when the decode failed. For a notification the
-// returned *Error is discarded, but the handler still runs so the failure can
-// be logged.
-//
-// The default is DefaultErrorHandler; install another with
-// Server.SetErrorHandler.
+// err is often already an *Error (Invalid params, Parse, Invalid Request);
+// anything else is unclassified. req is nil when nothing could be decoded,
+// and may be partial after a failed decode. For a notification the result is
+// discarded, but the handler still runs so the failure can be logged.
 type ErrorHandler func(ctx context.Context, req *Request, err error) *Error
 
-// DefaultErrorHandler sends an *Error verbatim and turns anything else into an
-// Internal error carrying the error's message. Since that reports an
-// unclassified error's text to the client, servers that must not leak
-// internals should install a handler that logs err and returns a fixed *Error.
+// DefaultErrorHandler sends an *Error verbatim and reports anything else as an
+// Internal error carrying its message. Servers that must not leak internals
+// install their own.
 func DefaultErrorHandler(_ context.Context, _ *Request, err error) *Error {
 	if e, ok := errors.AsType[*Error](err); ok {
 		// A typed-nil *Error must not read as success, and Error() on it panics.
@@ -77,8 +60,7 @@ type Server struct {
 	methods      map[string]RawHandler
 	middleware   []Middleware
 	errorHandler ErrorHandler
-	// opts is the json.Options every JSON operation runs under: the envelope
-	// decode, params, results, and responses. Nil means json/v2's defaults.
+	// opts governs every JSON operation. Nil means json/v2's defaults.
 	opts json.Options
 }
 
@@ -89,9 +71,8 @@ func NewServer() *Server {
 	}
 }
 
-// Use appends server-wide middleware applied to every handler, outside any
-// per-method middleware, with mw[0] outermost. Middleware is baked into each
-// handler at registration time, so Use panics once any method is registered.
+// Use appends server-wide middleware, outside any per-method middleware.
+// Panics once any method is registered.
 func (s *Server) Use(mw ...Middleware) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -101,19 +82,13 @@ func (s *Server) Use(mw ...Middleware) {
 	s.middleware = append(s.middleware, mw...)
 }
 
-// SetOptions installs json/v2 options applied to every JSON operation: the
-// request envelope, params into a typed handler's P, its R, and responses. Use
-// json.WithUnmarshalers and json.WithMarshalers to control how P and R appear
-// on the wire; any other json or jsontext option is honored too. Later calls
-// replace earlier ones.
+// SetOptions installs json/v2 options for every JSON operation: the envelope,
+// params into P, R, and responses. Later calls replace earlier ones. Panics
+// once any method is registered; for one method use Raw(fn, opts) with
+// RegisterRaw.
 //
-// Options are captured into each handler at registration time, so like Use,
-// SetOptions panics once any method is registered. For per-method options,
-// adapt the handler with Raw and install it with RegisterRaw.
-//
-// The options are used as given. An unmarshaler for *Request or a marshaler
-// for *Response replaces the type's own wire form, and is the way to take over
-// the envelope; json/v2 holds it to the same one-value contract as any other.
+// The options are used as given, so an unmarshaler for *Request or a
+// marshaler for *Response replaces the envelope's own wire form.
 func (s *Server) SetOptions(opts ...json.Options) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -123,9 +98,8 @@ func (s *Server) SetOptions(opts ...json.Options) {
 	s.opts = json.JoinOptions(opts...)
 }
 
-// SetErrorHandler replaces the handler that turns an error into the *Error sent
-// to the client. The default is DefaultErrorHandler. Like Use, it panics once
-// any method is registered, or on a nil handler.
+// SetErrorHandler replaces DefaultErrorHandler. Panics once any method is
+// registered, or on nil.
 func (s *Server) SetErrorHandler(h ErrorHandler) {
 	if h == nil {
 		panic("jsonrpc: SetErrorHandler requires a non-nil handler")
@@ -138,8 +112,7 @@ func (s *Server) SetErrorHandler(h ErrorHandler) {
 	s.errorHandler = h
 }
 
-// handleError runs the ErrorHandler over err, substituting an *Error of its own
-// if the handler returns nil.
+// handleError runs the ErrorHandler, substituting for a nil result.
 func (s *Server) handleError(ctx context.Context, req *Request, err error) *Error {
 	s.mu.RLock()
 	h := s.errorHandler
@@ -150,9 +123,8 @@ func (s *Server) handleError(ctx context.Context, req *Request, err error) *Erro
 	return NewError(CodeInternalError, "error handler returned a nil *jsonrpc.Error")
 }
 
-// RegisterRaw installs h under name, wrapped with the per-method middleware
-// (mw[0] outermost) and then the server-wide middleware. It panics if name is
-// taken.
+// RegisterRaw installs h under name, wrapped with mw (mw[0] outermost) and then
+// the server-wide middleware. Panics if name is taken.
 func (s *Server) RegisterRaw(name string, h RawHandler, mw ...Middleware) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -167,17 +139,15 @@ func (s *Server) registerRaw(name string, h RawHandler, mw []Middleware) {
 	s.methods[name] = chain(chain(h, mw), s.middleware)
 }
 
-// Register adapts fn with Raw, using the server's options, and installs it
-// under name. Equivalent to s.RegisterRaw(name, Raw(fn, opts), mw...).
+// Register installs Raw(fn, s.opts) under name; see RegisterRaw.
 func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middleware) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.registerRaw(name, Raw(fn, s.opts), mw)
 }
 
-// Serve dispatches a single request, returning nil for a notification — the
-// handler still runs, but no reply is produced. Panics in handlers are not
-// recovered; wrap Serve if your transport needs that.
+// Serve dispatches one request. A notification runs but returns nil. Handler
+// panics are not recovered.
 func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	// Validate the id first so later error responses never echo an invalid one.
 	if !req.IsNotification() && !isValidID(req.ID) {
@@ -203,8 +173,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 
 	result, err := h(ctx, req.Params)
 	if req.IsNotification() {
-		// No reply is allowed, but the ErrorHandler still runs so the failure
-		// can be logged; its *Error is discarded.
+		// No reply, but the ErrorHandler still runs so it can log.
 		if err != nil {
 			s.handleError(ctx, req, err)
 		}
@@ -213,23 +182,15 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 	if err != nil {
 		return NewErrorResponse(s.handleError(ctx, req, err), req.ID)
 	}
-	// NewSuccessResponse turns a nil result into JSON null: the spec requires
-	// the member on every success response.
+	// A nil result becomes JSON null; the spec requires the member.
 	return NewSuccessResponse(result, req.ID)
 }
 
-// ServeMessage parses data as a JSON-RPC message, dispatches it via Serve, and
-// returns the marshaled response bytes; notifications produce (nil, nil). Use
-// it from transports that work in raw JSON messages (WebSocket, stdio, TCP);
-// HTTP adapters that prefer parse failures as HTTP 400 should call Serve
-// directly.
-//
-// Batch messages (JSON arrays) are dispatched element by element, in order. A
-// batch of only notifications produces (nil, nil); an empty batch is an invalid
-// request.
-//
-// JSON-RPC errors are returned in-band as a marshaled error Response; the error
-// return is reserved for response marshaling failures.
+// ServeMessage parses one JSON-RPC message, dispatches it, and returns the
+// response bytes; a notification yields (nil, nil). Batches are dispatched
+// element by element; one of only notifications yields (nil, nil), and an
+// empty one is an Invalid Request. JSON-RPC errors are returned in-band; the
+// error return is for response marshaling failures.
 func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
 	if data.Kind() == '[' {
 		return s.serveBatch(ctx, data)
@@ -246,10 +207,9 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	return marshalResponse(resp, s.options())
 }
 
-// serveBatch dispatches a batch sequentially. Each element is decoded
-// independently so one invalid element yields one error entry rather than
-// failing the batch. The outer array split tolerates duplicate member names so
-// a duplicate inside an element surfaces as that element's error.
+// serveBatch decodes each element independently, so one bad element yields one
+// error entry. The array split tolerates duplicate names so a duplicate inside
+// an element is that element's error.
 func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
 	opts := s.options()
 	var elems []jsontext.Value
@@ -289,9 +249,8 @@ func (s *Server) decode(data jsontext.Value, req *Request) error {
 	return json.Unmarshal(data, req, s.options())
 }
 
-// classifyDecodeError maps a decode failure to the spec's codes. An *Error from
-// an unmarshaler wins outright; otherwise malformed JSON is a Parse error and
-// everything else an Invalid Request. The ErrorHandler still has the final say.
+// classifyDecodeError: an *Error wins; malformed JSON is a Parse error; the
+// rest is Invalid Request.
 func classifyDecodeError(err error) *Error {
 	if e, ok := errors.AsType[*Error](err); ok {
 		// A typed-nil *Error must not be surfaced, and Error() on it panics.
@@ -304,17 +263,15 @@ func classifyDecodeError(err error) *Error {
 	if errors.As(err, &syntaxErr) && !errors.Is(err, jsontext.ErrDuplicateName) {
 		return NewError(CodeParseError, err.Error())
 	}
-	// json/v2 wraps an unmarshaler's error in a *SemanticError naming the Go
-	// type. That framing is noise to a client, so report the underlying error.
+	// Drop json/v2's *SemanticError framing; the client wants the cause.
 	if se, ok := errors.AsType[*json.SemanticError](err); ok && se.Err != nil {
 		err = se.Err
 	}
 	return NewError(CodeInvalidRequest, err.Error())
 }
 
-// recoveredID returns the id a failed decode managed to read, or nil when there
-// is none to trust. The spec requires a null id only when none was detected, so
-// echoing a detected one lets the client correlate.
+// recoveredID returns an id the failed decode read, so the client can
+// correlate; the spec wants null only when none was detected.
 func recoveredID(req *Request) jsontext.Value {
 	if isValidID(req.ID) {
 		return req.ID
@@ -322,8 +279,7 @@ func recoveredID(req *Request) jsontext.Value {
 	return nil
 }
 
-// isValidID reports whether id is a JSON string, number, or null. The spec
-// discourages null and non-integer numbers but does not forbid them.
+// isValidID: a JSON string, number, or null.
 func isValidID(id jsontext.Value) bool {
 	switch id.Kind() {
 	case '"', '0', 'n': // string, any number, null
@@ -332,15 +288,12 @@ func isValidID(id jsontext.Value) bool {
 	return false
 }
 
-// marshalMessageError writes the error response ServeMessage produces when a
-// message never reaches Serve.
+// marshalMessageError writes the error for a message that never reached Serve.
 func (s *Server) marshalMessageError(e *Error, id jsontext.Value) (jsontext.Value, error) {
 	return marshalResponse(NewErrorResponse(e, id), s.options())
 }
 
-// marshalResponse writes one response, or a batch of them, under opts. A
-// failure yields no bytes at all rather than json.Marshal's partial buffer:
-// there is nothing usable to send, and the caller reports the error instead.
+// marshalResponse returns no bytes on failure rather than a partial buffer.
 func marshalResponse(v any, opts json.Options) (jsontext.Value, error) {
 	out, err := json.Marshal(v, opts)
 	if err != nil {
