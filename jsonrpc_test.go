@@ -416,9 +416,8 @@ func TestResponseUnmarshalJSONFrom(t *testing.T) {
 	}
 }
 
-// json/v2 does not zero the destination before calling the method, so a Response
-// decoded into twice must not keep members from the first message: a stale
-// result beside a fresh error would read as a response holding both.
+// json/v2 does not zero the destination, so a Response decoded into twice must
+// not keep the first message's members.
 func TestResponseUnmarshalJSONFromReplacesPriorMembers(t *testing.T) {
 	var resp Response
 	require.NoError(t, json.Unmarshal([]byte(`{"jsonrpc":"2.0","result":{"sum":3},"id":1}`), &resp))
@@ -430,14 +429,14 @@ func TestResponseUnmarshalJSONFromReplacesPriorMembers(t *testing.T) {
 	require.NotNil(t, resp.Error)
 	require.JSONEq(t, "2", string(resp.ID))
 
-	// A rejected message clears the receiver too, so a caller cannot mistake
-	// the previous response for this one.
+	// A rejected message clears it too, so the previous response cannot be
+	// mistaken for this one.
 	require.Error(t, json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":3}`), &resp))
 	require.Zero(t, resp)
 }
 
-// jsonrpchttp's Sender decodes with encoding/json v1, which is implemented over
-// v2 in Go 1.27, so the method's checks apply there too.
+// jsonrpchttp's Sender decodes with encoding/json v1, implemented over v2 in
+// Go 1.27, so the checks apply there too.
 func TestResponseUnmarshalJSONFromUnderJSONV1(t *testing.T) {
 	var resp Response
 	err := jsonv1.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1}`), &resp)
@@ -1292,9 +1291,8 @@ func TestRequestDecodesItself(t *testing.T) {
 	})
 }
 
-// json/v2 does not zero the destination before calling the method, so a Request
-// decoded into twice must not keep members from the first message: a stale id
-// would make the second one look like a request rather than a notification.
+// json/v2 does not zero the destination, so a stale id would make the second
+// message look like a request rather than a notification.
 func TestRequestUnmarshalJSONFromReplacesPriorMembers(t *testing.T) {
 	var req Request
 	require.NoError(t, json.Unmarshal(
@@ -1307,8 +1305,7 @@ func TestRequestUnmarshalJSONFromReplacesPriorMembers(t *testing.T) {
 	require.True(t, req.IsNotification())
 }
 
-// The reset must not cost the server the id it attributes a decode failure to:
-// members read before the failure stay put.
+// The reset must not cost the server the id it attributes a decode failure to.
 func TestRequestUnmarshalJSONFromKeepsMembersReadBeforeAFailure(t *testing.T) {
 	var req Request
 	err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1,"method":"add","surprise":true}`), &req)
