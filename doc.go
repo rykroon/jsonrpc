@@ -35,10 +35,10 @@
 // # Decoding and encoding
 //
 // Request and Response carry their own wire forms, as any Go type may:
-// Request.UnmarshalJSONFrom and Response.MarshalJSONTo apply to every
-// json.Unmarshal and json.Marshal of those types, inside this package or out,
-// under json/v2 or v1. A Server overrides either, since json/v2 consults the
-// options before a type's methods.
+// UnmarshalJSONFrom and MarshalJSONTo apply to every json.Unmarshal and
+// json.Marshal of those types, inside this package or out, under json/v2 or v1.
+// A Server overrides the two it drives — the request decode and the response
+// encode — since json/v2 consults the options before a type's methods.
 //
 // The request decode walks the message token by token so every rejection
 // carries a message this package wrote. It is strict — duplicate member names
@@ -131,9 +131,11 @@
 //
 // NewSuccessResponse and NewErrorResponse build one, normalizing an empty
 // result or id to JSON null; a hand-built Response holding both members or
-// neither is reported when it marshals rather than sent. DecodeResponse checks
-// the same invariants coming the other way, and DecodeResponses does it for a
-// batch reply; plain json.Unmarshal into a Response works too, unchecked.
+// neither is reported when it marshals rather than sent.
+// Response.UnmarshalJSONFrom checks the same invariants coming the other way,
+// so any json.Unmarshal into a Response is checked, not only the ones this
+// package drives; DecodeResponses applies it element by element to a batch
+// reply.
 //
 // # Polymorphic fields
 //

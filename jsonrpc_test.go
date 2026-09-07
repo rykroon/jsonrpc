@@ -47,9 +47,9 @@ func mustParams(t *testing.T, v any) jsontext.Value {
 // decodeResponse parses one marshaled response off the wire.
 func decodeResponse(t *testing.T, data jsontext.Value) *Response {
 	t.Helper()
-	resp, err := DecodeResponse(data)
-	require.NoError(t, err)
-	return resp
+	var resp Response
+	require.NoError(t, json.Unmarshal(data, &resp))
+	return &resp
 }
 
 // decodeResponses parses a marshaled batch reply.
@@ -363,7 +363,7 @@ func TestServeReturnsResponseShapes(t *testing.T) {
 	require.NoError(t, bad.Decode(new(addResult)), "there is no result to decode")
 }
 
-func TestDecodeResponse(t *testing.T) {
+func TestResponseUnmarshalJSONFrom(t *testing.T) {
 	const (
 		fails = iota
 		success
@@ -379,6 +379,12 @@ func TestDecodeResponse(t *testing.T) {
 		{"error", `{"jsonrpc":"2.0","error":{"code":-32601,"message":"nope"},"id":1}`, failure},
 		{"null id", `{"jsonrpc":"2.0","error":{"code":-32700,"message":"nope"},"id":null}`, failure},
 		{"unknown members are tolerated", `{"jsonrpc":"2.0","result":1,"id":1,"extra":true}`, success},
+		{"a structured unknown member is skipped whole", `{"jsonrpc":"2.0","meta":{"a":[1,{"b":2}]},"result":1,"id":1}`, success},
+		{"members in any order", `{"id":1,"result":1,"jsonrpc":"2.0"}`, success},
+		{"non-string jsonrpc", `{"jsonrpc":2.0,"result":1,"id":1}`, fails},
+		{"error is not an object", `{"jsonrpc":"2.0","error":"nope","id":1}`, fails},
+		{"duplicate member inside a nested value", `{"jsonrpc":"2.0","result":{"a":1,"a":2},"id":1}`, fails},
+		{"truncated after a member", `{"jsonrpc":"2.0","result":1,"id":1`, fails},
 		{"both result and error", `{"jsonrpc":"2.0","result":1,"error":{"code":-1,"message":"x"},"id":1}`, fails},
 		{"neither result nor error", `{"jsonrpc":"2.0","id":1}`, fails},
 		{"wrong version", `{"jsonrpc":"1.0","result":1,"id":1}`, fails},
@@ -389,10 +395,11 @@ func TestDecodeResponse(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := DecodeResponse([]byte(tc.in))
+			var got Response
+			err := json.Unmarshal([]byte(tc.in), &got)
 			if tc.want == fails {
 				require.Error(t, err)
-				require.Nil(t, got)
+				require.Zero(t, got, "a rejected response leaves the receiver untouched")
 				return
 			}
 			require.NoError(t, err)
@@ -409,7 +416,38 @@ func TestDecodeResponse(t *testing.T) {
 	}
 }
 
-func TestDecodeResponseRoundTrip(t *testing.T) {
+// json/v2 does not zero the destination before calling the method, so a Response
+// decoded into twice must not keep members from the first message: a stale
+// result beside a fresh error would read as a response holding both.
+func TestResponseUnmarshalJSONFromReplacesPriorMembers(t *testing.T) {
+	var resp Response
+	require.NoError(t, json.Unmarshal([]byte(`{"jsonrpc":"2.0","result":{"sum":3},"id":1}`), &resp))
+	require.NotNil(t, resp.Result)
+
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"jsonrpc":"2.0","error":{"code":-32601,"message":"nope"},"id":2}`), &resp))
+	require.Nil(t, resp.Result, "the first message's result does not survive")
+	require.NotNil(t, resp.Error)
+	require.JSONEq(t, "2", string(resp.ID))
+
+	// A rejected message clears the receiver too, so a caller cannot mistake
+	// the previous response for this one.
+	require.Error(t, json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":3}`), &resp))
+	require.Zero(t, resp)
+}
+
+// jsonrpchttp's Sender decodes with encoding/json v1, which is implemented over
+// v2 in Go 1.27, so the method's checks apply there too.
+func TestResponseUnmarshalJSONFromUnderJSONV1(t *testing.T) {
+	var resp Response
+	err := jsonv1.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1}`), &resp)
+	require.ErrorContains(t, err, "neither result nor error")
+
+	require.NoError(t, jsonv1.Unmarshal([]byte(`{"jsonrpc":"2.0","result":1,"id":1}`), &resp))
+	require.JSONEq(t, "1", string(resp.Result))
+}
+
+func TestResponseUnmarshalJSONFromRoundTrip(t *testing.T) {
 	s := newTestServer(t)
 
 	out, err := s.ServeMessage(context.Background(),
@@ -1252,6 +1290,31 @@ func TestRequestDecodesItself(t *testing.T) {
 		err := jsonv1.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`), &req)
 		require.ErrorContains(t, err, "unknown member: surprise")
 	})
+}
+
+// json/v2 does not zero the destination before calling the method, so a Request
+// decoded into twice must not keep members from the first message: a stale id
+// would make the second one look like a request rather than a notification.
+func TestRequestUnmarshalJSONFromReplacesPriorMembers(t *testing.T) {
+	var req Request
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1},"id":1}`), &req))
+	require.False(t, req.IsNotification())
+
+	require.NoError(t, json.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"ping"}`), &req))
+	require.Empty(t, req.ID, "the first message's id does not survive")
+	require.Empty(t, req.Params, "nor its params")
+	require.True(t, req.IsNotification())
+}
+
+// The reset must not cost the server the id it attributes a decode failure to:
+// members read before the failure stay put.
+func TestRequestUnmarshalJSONFromKeepsMembersReadBeforeAFailure(t *testing.T) {
+	var req Request
+	err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1,"method":"add","surprise":true}`), &req)
+	require.ErrorContains(t, err, "unknown member: surprise")
+	require.JSONEq(t, "1", string(req.ID))
+	require.Equal(t, "add", req.Method)
 }
 
 // An unmarshaler or marshaler in the options outranks a method, so SetOptions

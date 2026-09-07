@@ -39,7 +39,17 @@ func (r *Request) IsNotification() bool {
 //
 // Required members are not checked here: Serve rejects a missing method or
 // wrong version on every path.
+//
+// The Request is reset first, since json/v2 does not zero the destination
+// before calling this method and a member this message omits must not be
+// carried over from a previous one — a stale id would make a notification look
+// like a request. Members are then filled in place rather than assigned at the
+// end, unlike Response.UnmarshalJSONFrom: a failure partway through keeps
+// whatever was read before it, which is how the server recovers an id to
+// attribute an error response to.
 func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
+	*req = Request{}
+
 	tok, err := d.ReadToken()
 	if err != nil {
 		return tokenError(err)

@@ -72,7 +72,8 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Respo
 	if err != nil {
 		return nil, fmt.Errorf("jsonrpchttp: read response: %w", err)
 	}
-	rpcResp, err := jsonrpc.DecodeResponse(data)
+	var rpcResp *jsonrpc.Response
+	err = json.Unmarshal(data, &rpcResp)
 	if err != nil {
 		return nil, fmt.Errorf("jsonrpchttp: %w", err)
 	}

@@ -141,10 +141,11 @@ as an Internal error carrying the error's message.
   tells the two apart, and `Decode` unmarshals a successful result into a
   target. `NewSuccessResponse` / `NewErrorResponse` normalize an empty result
   or id to JSON null, and it writes itself in canonical form with
-  `MarshalJSONTo`.
-- `DecodeResponse` / `DecodeResponses` — parse a response (or a batch reply)
-  off the wire, checking the spec's invariants; what a `Sender` implementation
-  reaches for.
+  `MarshalJSONTo` and reads itself with `UnmarshalJSONFrom`, so any
+  `json.Unmarshal` into one checks the spec's invariants — what a `Sender`
+  implementation reaches for.
+- `DecodeResponses` — parse a batch reply off the wire, applying those same
+  checks element by element.
 - `Server.ServeMessage` — byte-level entry point for transports that
   work in raw messages (stdio, WebSocket, TCP stream). Handles batch
   messages (JSON arrays) per the spec.
