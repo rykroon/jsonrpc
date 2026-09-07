@@ -37,8 +37,6 @@
 // Request and Response carry their own wire forms, as any Go type may:
 // UnmarshalJSONFrom and MarshalJSONTo apply to every json.Unmarshal and
 // json.Marshal of those types, inside this package or out, under json/v2 or v1.
-// A Server overrides the two it drives — the request decode and the response
-// encode — since json/v2 consults the options before a type's methods.
 //
 // The request decode walks the message token by token so every rejection
 // carries a message this package wrote. It is strict — duplicate member names
@@ -49,20 +47,9 @@
 // request with no parameters omits the member, as NewParams(nil) and
 // Client.Call with nil params do.
 //
-// Server.SetRequestDecoder installs a RequestDecoder over it, taking control of
-// the errors reported for a malformed envelope: an *Error from a decoder
-// chooses the code, message, and Data, while any other error is classified as a
-// Parse error or an Invalid Request. Either way the ErrorHandler has the final
-// say. Whatever the decoder does, Serve independently validates every Request
-// it dispatches (id shape, "2.0" version, non-empty method), since transports
-// may build a Request without decoding one.
-//
-// Server.SetResponseEncoder is the mirror, deciding the wire form of every
-// response the server sends. The default writes the canonical object — the
-// version from Version, then result or error, then id — and reports a response
-// holding both members or neither rather than sending it. An encoder's errors
-// are not JSON-RPC errors, since there is no response left to carry one, so
-// they surface as ServeMessage's error return.
+// The response encode writes the canonical object — the version from Version,
+// then result or error, then id — and reports a response holding both members
+// or neither rather than sending it.
 //
 // # Options
 //
@@ -75,17 +62,25 @@
 // like Use, must run before any method is registered; for a single method, use
 // Raw(fn, opts) with RegisterRaw.
 //
-// A RequestDecoder or ResponseEncoder rides in the same options, as the
-// unmarshaler for *Request and the marshaler for *Response, outranking anything
-// set for those types here — the setters' one advantage over installing the
-// functions directly. Sharing one policy has two consequences: jsontext-level
-// options such as jsontext.AllowDuplicateNames govern the envelope decode while
-// json-level ones do not (it walks tokens and stores params raw), and omitted
-// params yield the zero P without consulting any unmarshaler.
+// The options are used exactly as given, so they can also replace the envelope
+// itself: json/v2 consults the options before a type's methods, so an
+// unmarshaler for *Request or a marshaler for *Response takes over that side of
+// the wire, and can delegate to the type's own method. An *Error from such an
+// unmarshaler chooses the code, message, and Data sent back, while any other
+// error is classified as a Parse error or an Invalid Request; either way the
+// ErrorHandler has the final say, and Serve independently validates every
+// Request it dispatches (id shape, "2.0" version, non-empty method). A
+// marshaler's errors are not JSON-RPC errors, since there is no response left
+// to carry one, so they surface as ServeMessage's error return.
+//
+// Sharing one policy has two consequences: jsontext-level options such as
+// jsontext.AllowDuplicateNames govern the envelope decode while json-level ones
+// do not (it walks tokens and stores params raw), and omitted params yield the
+// zero P without consulting any unmarshaler.
 //
 // # Errors
 //
-// Handler, RawHandler, and RequestDecoder all return a plain error. Returning
+// Handler and RawHandler both return a plain error. Returning
 // an *Error names the code, message, and Data; anything else leaves that to
 // the server, and can be wrapped with fmt.Errorf and %w without losing context.
 //

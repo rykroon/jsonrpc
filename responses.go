@@ -60,8 +60,8 @@ func (r Response) Decode(into any) error {
 // MarshalJSONTo writes the response as tokens rather than through the struct
 // tags, so the shape is the spec's regardless of what the fields hold: the
 // version is always Version, the members are ordered, and an empty id is
-// written as JSON null. A Server's ResponseEncoder overrides this, and can
-// delegate here.
+// written as JSON null. A marshaler for *Response in a Server's options
+// overrides this, and can delegate here.
 //
 // Exactly one of Result and Error must be set — a response with both or with
 // neither is a bug, and is reported here instead of being sent. WriteValue

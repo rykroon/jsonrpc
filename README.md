@@ -124,13 +124,9 @@ as an Internal error carrying the error's message.
   cause. Also called for notification failures, which send no reply.
 - `Server.SetOptions` — install json/v2 options (e.g. `json.WithMarshalers`,
   `json.WithUnmarshalers`) that control how every method's params are
-  decoded and results encoded
-- `Server.SetRequestDecoder` / `Server.SetResponseEncoder` — override the
-  wire form of the envelope in either direction: the errors reported for a
-  malformed request, or the shape of every response sent. Each is shorthand
-  for the json/v2 option that installs the same function, and outranks it.
-  Absent them, `Request` and `Response` decode and encode themselves with
-  `UnmarshalJSONFrom` and `MarshalJSONTo`.
+  decoded and results encoded. The options are used as given, so an
+  unmarshaler for `*Request` or a marshaler for `*Response` takes over the
+  envelope itself.
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
   requests without touching `jsontext.Value` directly.
 - `Request` — a plain struct with `Params` and `ID` kept as raw JSON. It

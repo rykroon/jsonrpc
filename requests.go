@@ -29,7 +29,8 @@ func (r *Request) IsNotification() bool {
 // every rejection carries a message this package wrote rather than one from the
 // JSON library: an unrecognized envelope member, a non-string method, or
 // non-structured params are Invalid Request, while malformed input is a Parse
-// error. A Server's RequestDecoder overrides this, and can delegate here.
+// error. An unmarshaler for *Request in a Server's options overrides this,
+// and can delegate here.
 //
 // Duplicate member names are rejected anywhere, including inside params, since
 // detection is tokenizer-level. Params content is otherwise not validated, so

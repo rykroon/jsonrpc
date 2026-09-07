@@ -1,7 +1,6 @@
 package jsonrpc_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -124,99 +123,6 @@ func ExampleServer_ServeMessage() {
 	out, _ := s.ServeMessage(context.Background(), in)
 	fmt.Println(string(out))
 	// Output: {"jsonrpc":"2.0","result":"ping","id":1}
-}
-
-// ExampleServer_SetRequestDecoder replaces the request decoder to control the
-// errors reported for a bad envelope. This one delegates to the package
-// default, then adds the offending message to the error's Data.
-func ExampleServer_SetRequestDecoder() {
-	type errorData struct {
-		Got string `json:"got"`
-	}
-
-	s := jsonrpc.NewServer()
-	s.SetRequestDecoder(func(d *jsontext.Decoder, req *jsonrpc.Request) error {
-		// One ReadValue consumes the decoder's one value and hands back the raw
-		// message, which the error below quotes.
-		raw, err := d.ReadValue()
-		if err != nil {
-			return err
-		}
-		raw = raw.Clone()
-		err = req.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(raw)))
-		e, ok := errors.AsType[*jsonrpc.Error](err)
-		if !ok {
-			// Not a classified error: let the server classify it.
-			return err
-		}
-		// Returning an *Error hands the client exactly this object.
-		return jsonrpc.NewError(e.Code, e.Message).MustSetData(errorData{Got: string(raw)})
-	})
-	s.Register("add", func(_ context.Context, p struct {
-		A, B int
-	}) (int, error) {
-		return p.A + p.B, nil
-	})
-
-	out, _ := s.ServeMessage(context.Background(),
-		[]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`))
-	fmt.Println(string(out))
-	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"unknown member: surprise","data":{"got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
-}
-
-// ExampleServer_SetResponseEncoder controls the wire form of every response the
-// server sends. This one stamps each with a non-standard member; an encoder
-// that only wants to observe them delegates to Response.MarshalJSONTo.
-func ExampleServer_SetResponseEncoder() {
-	s := jsonrpc.NewServer()
-	s.SetResponseEncoder(func(e *jsontext.Encoder, resp *jsonrpc.Response) error {
-		if err := e.WriteToken(jsontext.BeginObject); err != nil {
-			return err
-		}
-		if err := e.WriteToken(jsontext.String("jsonrpc")); err != nil {
-			return err
-		}
-		if err := e.WriteToken(jsontext.String(jsonrpc.Version)); err != nil {
-			return err
-		}
-		member, value := "result", resp.Result
-		if resp.Error != nil {
-			errValue, err := json.Marshal(resp.Error)
-			if err != nil {
-				return err
-			}
-			member, value = "error", errValue
-		}
-		if err := e.WriteToken(jsontext.String(member)); err != nil {
-			return err
-		}
-		if err := e.WriteValue(value); err != nil {
-			return err
-		}
-		if err := e.WriteToken(jsontext.String("id")); err != nil {
-			return err
-		}
-		if err := e.WriteValue(resp.ID); err != nil {
-			return err
-		}
-		if err := e.WriteToken(jsontext.String("server")); err != nil {
-			return err
-		}
-		if err := e.WriteToken(jsontext.String("example/1.0")); err != nil {
-			return err
-		}
-		return e.WriteToken(jsontext.EndObject)
-	})
-	s.Register("add", func(_ context.Context, p struct {
-		A, B int
-	}) (int, error) {
-		return p.A + p.B, nil
-	})
-
-	out, _ := s.ServeMessage(context.Background(),
-		[]byte(`{"jsonrpc":"2.0","method":"add","params":{"A":1,"B":2},"id":1}`))
-	fmt.Println(string(out))
-	// Output: {"jsonrpc":"2.0","result":3,"id":1,"server":"example/1.0"}
 }
 
 // ExampleServer_SetOptions installs json/v2 options every typed method decodes

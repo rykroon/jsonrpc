@@ -63,30 +63,6 @@ func DefaultErrorHandler(_ context.Context, _ *Request, err error) *Error {
 	return NewError(CodeInternalError, err.Error())
 }
 
-// RequestDecoder overrides Request.UnmarshalJSONFrom for one server, and can
-// delegate to it. Batch splitting happens above it, so a decoder always sees
-// exactly one request object.
-//
-// The signature is json.UnmarshalFromFunc's, and SetRequestDecoder installs a
-// decoder as exactly that: json/v2's unmarshaler for a *Request. A decoder must
-// therefore read exactly one JSON value from d — one that ignores the input
-// still calls d.SkipValue — and in return inherits json/v2's machinery,
-// including the rejection of trailing data.
-//
-// Returning an *Error gives the decoder full control of the code, message, and
-// Data. Any other error is classified by the server: malformed JSON as a Parse
-// error, everything else as an Invalid Request.
-type RequestDecoder func(d *jsontext.Decoder, req *Request) error
-
-// ResponseEncoder is the counterpart to RequestDecoder: it overrides
-// Response.MarshalJSONTo for one server, deciding the wire form of every
-// response sent, and can delegate to it. The signature is json.MarshalToFunc's,
-// so an encoder must write exactly one JSON value to enc.
-//
-// An error from an encoder is not a JSON-RPC error — there is no response left
-// to report it in — so it surfaces as ServeMessage's error return.
-type ResponseEncoder func(enc *jsontext.Encoder, resp *Response) error
-
 // chain wraps h with mw, applying mw[0] outermost.
 func chain(h RawHandler, mw []Middleware) RawHandler {
 	for i := len(mw) - 1; i >= 0; i-- {
@@ -97,61 +73,20 @@ func chain(h RawHandler, mw []Middleware) RawHandler {
 
 // Server is a registry of JSON-RPC methods that dispatches requests to them.
 type Server struct {
-	mu         sync.RWMutex
-	methods    map[string]RawHandler
-	middleware []Middleware
-	// decoder, encoder and userOpts are the inputs to opts, kept so any setter
-	// can rebuild it without disturbing the others. Nil means none was
-	// installed.
-	decoder      RequestDecoder
-	encoder      ResponseEncoder
+	mu           sync.RWMutex
+	methods      map[string]RawHandler
+	middleware   []Middleware
 	errorHandler ErrorHandler
-	userOpts     json.Options
-	// opts is the single json.Options used for every JSON operation: a
-	// RequestDecoder and ResponseEncoder ride in it as the unmarshaler for a
-	// *Request and the marshaler for a *Response, alongside whatever SetOptions
-	// installed.
+	// opts is the json.Options every JSON operation runs under: the envelope
+	// decode, params, results, and responses. Nil means json/v2's defaults.
 	opts json.Options
 }
 
 func NewServer() *Server {
-	s := &Server{
+	return &Server{
 		methods:      map[string]RawHandler{},
 		errorHandler: DefaultErrorHandler,
 	}
-	s.rebuildOptions()
-	return s
-}
-
-// rebuildOptions derives opts from decoder, encoder and userOpts, keeping
-// construction off the request path. The caller holds mu. With neither
-// installed, opts is exactly what SetOptions was given, leaving Request and
-// Response to decode and encode themselves.
-//
-// json.JoinOptions lets a later WithUnmarshalers replace an earlier one, so a
-// decoder is joined with the user's unmarshalers rather than layered over them,
-// and the same for an encoder. The setter's function comes first, so it wins
-// for its type.
-func (s *Server) rebuildOptions() {
-	opts := []json.Options{}
-	if s.userOpts != nil {
-		opts = append(opts, s.userOpts)
-	}
-	if s.decoder != nil {
-		us := json.UnmarshalFromFunc(s.decoder)
-		if u, ok := json.GetOption(s.userOpts, json.WithUnmarshalers); ok && u != nil {
-			us = json.JoinUnmarshalers(us, u)
-		}
-		opts = append(opts, json.WithUnmarshalers(us))
-	}
-	if s.encoder != nil {
-		ms := json.MarshalToFunc(s.encoder)
-		if m, ok := json.GetOption(s.userOpts, json.WithMarshalers); ok && m != nil {
-			ms = json.JoinMarshalers(ms, m)
-		}
-		opts = append(opts, json.WithMarshalers(ms))
-	}
-	s.opts = json.JoinOptions(opts...)
 }
 
 // Use appends server-wide middleware applied to every handler, outside any
@@ -176,55 +111,16 @@ func (s *Server) Use(mw ...Middleware) {
 // SetOptions panics once any method is registered. For per-method options,
 // adapt the handler with Raw and install it with RegisterRaw.
 //
-// A RequestDecoder or ResponseEncoder rides in the same options, outranking
-// anything set here for *Request or *Response.
+// The options are used as given. An unmarshaler for *Request or a marshaler
+// for *Response replaces the type's own wire form, and is the way to take over
+// the envelope; json/v2 holds it to the same one-value contract as any other.
 func (s *Server) SetOptions(opts ...json.Options) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.methods) > 0 {
 		panic("jsonrpc: SetOptions must be called before registering methods")
 	}
-	s.userOpts = json.JoinOptions(opts...)
-	s.rebuildOptions()
-}
-
-// SetRequestDecoder installs a decoder for inbound messages, taking control of
-// the errors reported for a malformed envelope. Absent one, a Request decodes
-// itself. Like Use, it panics once any method is registered, or on a nil
-// decoder.
-//
-// Shorthand for SetOptions(json.WithUnmarshalers(json.UnmarshalFromFunc(d))),
-// except that the decoder outranks any *Request unmarshaler set there.
-func (s *Server) SetRequestDecoder(d RequestDecoder) {
-	if d == nil {
-		panic("jsonrpc: SetRequestDecoder requires a non-nil decoder")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.methods) > 0 {
-		panic("jsonrpc: SetRequestDecoder must be called before registering methods")
-	}
-	s.decoder = d
-	s.rebuildOptions()
-}
-
-// SetResponseEncoder installs an encoder for outbound responses, taking control
-// of their wire form. Absent one, a Response writes itself. Like Use, it panics
-// once any method is registered, or on a nil encoder.
-//
-// Shorthand for SetOptions(json.WithMarshalers(json.MarshalToFunc(e))), except
-// that the encoder outranks any *Response marshaler set there.
-func (s *Server) SetResponseEncoder(e ResponseEncoder) {
-	if e == nil {
-		panic("jsonrpc: SetResponseEncoder requires a non-nil encoder")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.methods) > 0 {
-		panic("jsonrpc: SetResponseEncoder must be called before registering methods")
-	}
-	s.encoder = e
-	s.rebuildOptions()
+	s.opts = json.JoinOptions(opts...)
 }
 
 // SetErrorHandler replaces the handler that turns an error into the *Error sent
@@ -388,17 +284,14 @@ func (s *Server) options() json.Options {
 	return s.opts
 }
 
-// decode runs the server's RequestDecoder over one message. json/v2 drives it,
-// so the one-value contract and the trailing-data check are enforced by the
-// same code that enforces them for any other unmarshaler.
+// decode reads one message under the server's options.
 func (s *Server) decode(data jsontext.Value, req *Request) error {
 	return json.Unmarshal(data, req, s.options())
 }
 
-// classifyDecodeError maps a decode failure to the spec's codes. A decoder that
-// classified its own failure wins outright; otherwise malformed JSON is a Parse
-// error and everything else an Invalid Request. The ErrorHandler still has the
-// final say.
+// classifyDecodeError maps a decode failure to the spec's codes. An *Error from
+// an unmarshaler wins outright; otherwise malformed JSON is a Parse error and
+// everything else an Invalid Request. The ErrorHandler still has the final say.
 func classifyDecodeError(err error) *Error {
 	if e, ok := errors.AsType[*Error](err); ok {
 		// A typed-nil *Error must not be surfaced, and Error() on it panics.
@@ -412,7 +305,7 @@ func classifyDecodeError(err error) *Error {
 		return NewError(CodeParseError, err.Error())
 	}
 	// json/v2 wraps an unmarshaler's error in a *SemanticError naming the Go
-	// type. That framing is noise to a client, so report what the decoder said.
+	// type. That framing is noise to a client, so report the underlying error.
 	if se, ok := errors.AsType[*json.SemanticError](err); ok && se.Err != nil {
 		err = se.Err
 	}
