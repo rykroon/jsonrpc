@@ -145,7 +145,10 @@ as an Internal error carrying the error's message.
   envelope itself. `Client.SetOptions` installs the same policy on the
   calling side.
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
-  requests without touching `jsontext.Value` directly.
+  requests without touching `jsontext.Value` directly. `NewParams` enforces
+  §4.2 on the way out: params must marshal to an object or an array, so a
+  scalar (or a typed nil, which marshals to `null`) is an error locally
+  rather than an Invalid Request from the far end.
 - `Request` — a plain struct with `Params` and `ID` kept as raw JSON. It
   decodes itself with `UnmarshalJSONFrom`, so the strict envelope check applies
   to any `json.Unmarshal` into one, not only the ones a `Server` drives.

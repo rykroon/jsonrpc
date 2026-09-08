@@ -2,9 +2,9 @@ package jsonrpc
 
 import (
 	"encoding/json/jsontext"
-	"errors"
-
 	"encoding/json/v2"
+	"errors"
+	"fmt"
 )
 
 const Version = "2.0"
@@ -128,13 +128,27 @@ func NewID[T ~string | ~int | ~int64 | ~uint64](v T) jsontext.Value {
 }
 
 // NewParams marshals v for Request.Params under opts. A nil v returns nil; a
-// jsontext.Value passes through untouched, opts included.
+// jsontext.Value passes through unmarshaled, opts included.
+//
+// The result must be structured, as §4.2 requires: a scalar, a null (a typed
+// nil marshals to one), or an empty value is an error here rather than an
+// Invalid Request from the far end. Only the first token is read, so a
+// passed-through value is checked for shape, not validity.
 func NewParams(v any, opts ...json.Options) (jsontext.Value, error) {
 	if v == nil {
 		return nil, nil
 	}
-	if raw, ok := v.(jsontext.Value); ok {
+	raw, ok := v.(jsontext.Value)
+	if !ok {
+		b, err := json.Marshal(v, opts...)
+		if err != nil {
+			return nil, err
+		}
+		raw = b
+	}
+	switch raw.Kind() {
+	case '{', '[':
 		return raw, nil
 	}
-	return json.Marshal(v, opts...)
+	return nil, fmt.Errorf("jsonrpc: params must be a JSON object or array, got %s", raw.Kind())
 }

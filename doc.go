@@ -32,7 +32,9 @@
 // envelope members are Invalid Request (unknown members inside params are
 // tolerated). Per the spec params must be structured when present, so P is a
 // struct or slice, never a scalar, and "params":null is rejected; a request
-// with no parameters omits the member, as NewParams(nil) does.
+// with no parameters omits the member, as NewParams(nil) does. NewParams holds
+// the sending side to the same rule, so a request the far end would reject is
+// not built in the first place.
 //
 // The response encode writes the canonical object — version, result or
 // error, id — and refuses one holding both members or neither.

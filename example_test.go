@@ -33,18 +33,26 @@ func ExampleServer() {
 	// Output: {"jsonrpc":"2.0","result":5,"id":1}
 }
 
+// greetParams is a struct because §4.2 requires structured params: a bare
+// "world" is not a legal params value.
+type greetParams struct {
+	Name string `json:"name"`
+}
+
+func greet(_ context.Context, p greetParams) (string, error) {
+	return "hello " + p.Name, nil
+}
+
 // ExampleClient_Call makes a one-line method call: params are marshaled,
 // the id is generated, and the result is decoded into the target.
 func ExampleClient_Call() {
 	s := jsonrpc.NewServer()
-	s.Register("greet", func(_ context.Context, name string) (string, error) {
-		return "hello " + name, nil
-	})
+	s.Register("greet", greet)
 
 	c := jsonrpc.NewClient(s.Sender())
 
 	var greeting string
-	if err := c.Call(context.Background(), "greet", "world", &greeting); err != nil {
+	if err := c.Call(context.Background(), "greet", greetParams{Name: "world"}, &greeting); err != nil {
 		fmt.Println("call failed:", err)
 		return
 	}
@@ -56,13 +64,15 @@ func ExampleClient_Call() {
 // through an in-process Server.
 func ExampleClient_Send() {
 	s := jsonrpc.NewServer()
-	s.Register("greet", func(_ context.Context, name string) (string, error) {
-		return "hello " + name, nil
-	})
+	s.Register("greet", greet)
 
 	c := jsonrpc.NewClient(s.Sender())
 
-	params, _ := jsonrpc.NewParams("world")
+	params, err := jsonrpc.NewParams(greetParams{Name: "world"})
+	if err != nil {
+		fmt.Println("bad params:", err)
+		return
+	}
 	resp, err := c.Send(context.Background(), jsonrpc.NewRequest("greet", params, jsonrpc.NewID(1)))
 	if err != nil {
 		fmt.Println("transport error:", err)

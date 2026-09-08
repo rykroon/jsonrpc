@@ -753,6 +753,58 @@ func TestNewParamsPassthrough(t *testing.T) {
 	require.Nil(t, out)
 }
 
+// TestNewParamsRequiresStructured pins §4.2 at the point of construction, so a
+// request the server would reject is not built in the first place.
+func TestNewParamsRequiresStructured(t *testing.T) {
+	t.Run("accepts both structured shapes", func(t *testing.T) {
+		for _, v := range []any{
+			addParams{A: 1},
+			[]int{1, 2},
+			jsontext.Value(`{"a":1}`),
+			jsontext.Value(` [1] `),
+		} {
+			out, err := NewParams(v)
+			require.NoError(t, err, "%v", v)
+			require.NotEmpty(t, out)
+		}
+	})
+
+	t.Run("rejects scalars, nulls, and empties", func(t *testing.T) {
+		for _, v := range []any{
+			5,
+			"world",
+			true,
+			(*addParams)(nil), // marshals to null
+			jsontext.Value(`5`),
+			jsontext.Value(`null`),
+			jsontext.Value(``), // empty but non-nil, so not the "no params" case
+		} {
+			out, err := NewParams(v)
+			require.Error(t, err, "%v", v)
+			require.Nil(t, out)
+			require.Contains(t, err.Error(), "params must be a JSON object or array")
+		}
+	})
+
+	t.Run("the check sees the options marshaler's output", func(t *testing.T) {
+		// tempMarshaler turns a temperature into a string, so P itself becomes
+		// a scalar even though the Go value is not one.
+		_, err := NewParams(temperature(21.5), json.WithMarshalers(tempMarshaler))
+		require.ErrorContains(t, err, "got string")
+	})
+
+	t.Run("Call and Notify report it before sending", func(t *testing.T) {
+		var sent int
+		c := NewClient(SenderFunc(func(context.Context, *Request) (*Response, error) {
+			sent++
+			return nil, nil
+		}))
+		require.ErrorContains(t, c.Call(context.Background(), "m", 5, nil), "marshal params")
+		require.ErrorContains(t, c.Notify(context.Background(), "m", 5), "marshal params")
+		require.Zero(t, sent)
+	})
+}
+
 func TestRawWithHandlerValidation(t *testing.T) {
 	s := NewServer()
 	// Validation lives in the handler, next to the code that depends on it,
