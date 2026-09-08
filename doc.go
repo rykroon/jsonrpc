@@ -106,6 +106,11 @@
 // jsontext.Value because the spec leaves their types open; Register and Raw
 // decode params and results for you.
 //
+// The two the spec does constrain are checked where they are built: NewParams
+// requires an object or an array, and NewID a string or a number. NewID
+// returns its error rather than an empty id, since an empty id is how
+// IsNotification decides — dropping it would turn a call into a notification.
+//
 // # Not included
 //
 // Client-side batching: Sender is a single request/response seam.

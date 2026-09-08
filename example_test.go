@@ -73,7 +73,7 @@ func ExampleClient_Send() {
 		fmt.Println("bad params:", err)
 		return
 	}
-	resp, err := c.Send(context.Background(), jsonrpc.NewRequest("greet", params, jsonrpc.NewID(1)))
+	resp, err := c.Send(context.Background(), jsonrpc.NewRequest("greet", params, jsonrpc.MustNewID(1)))
 	if err != nil {
 		fmt.Println("transport error:", err)
 		return
