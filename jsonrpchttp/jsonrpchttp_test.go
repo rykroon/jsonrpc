@@ -2,7 +2,7 @@ package jsonrpchttp_test
 
 import (
 	"context"
-	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,8 +144,10 @@ func TestHandlerBatchRoundTrip(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var resps []jsonrpc.Response
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&resps))
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	resps, err := jsonrpc.DecodeResponses(body)
+	require.NoError(t, err)
 	require.Len(t, resps, 2)
 	assert.JSONEq(t, "2", string(resps[0].Result))
 	assert.JSONEq(t, "11", string(resps[1].Result))

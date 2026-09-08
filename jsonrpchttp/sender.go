@@ -3,7 +3,7 @@ package jsonrpchttp
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,8 +21,8 @@ type Sender struct {
 	// URL is the JSON-RPC endpoint. Required.
 	URL string
 
-	// Client is the HTTP client used for round-trips. If nil,
-	// http.DefaultClient is used.
+	// Client is the HTTP client used for round-trips. Nil means
+	// http.DefaultClient.
 	Client *http.Client
 }
 
@@ -52,7 +52,7 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Respo
 	defer resp.Body.Close()
 
 	// A non-2xx reply (proxy 502, server 500, ...) carries no JSON-RPC
-	// response; surface it as a transport error rather than a decode failure.
+	// response; surface it as a transport error, not a decode failure.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		io.Copy(io.Discard, resp.Body)
 		return nil, fmt.Errorf("jsonrpchttp: unexpected HTTP status %s", resp.Status)
@@ -72,9 +72,10 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Respo
 	if err != nil {
 		return nil, fmt.Errorf("jsonrpchttp: read response: %w", err)
 	}
-	var jr jsonrpc.Response
-	if err := json.Unmarshal(data, &jr); err != nil {
-		return nil, fmt.Errorf("jsonrpchttp: decode response: %w", err)
+	var rpcResp *jsonrpc.Response
+	err = json.Unmarshal(data, &rpcResp)
+	if err != nil {
+		return nil, fmt.Errorf("jsonrpchttp: %w", err)
 	}
-	return &jr, nil
+	return rpcResp, nil
 }

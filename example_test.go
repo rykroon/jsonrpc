@@ -2,10 +2,11 @@ package jsonrpc_test
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/rykroon/jsonrpc"
 )
@@ -32,18 +33,26 @@ func ExampleServer() {
 	// Output: {"jsonrpc":"2.0","result":5,"id":1}
 }
 
+// greetParams is a struct because §4.2 requires structured params: a bare
+// "world" is not a legal params value.
+type greetParams struct {
+	Name string `json:"name"`
+}
+
+func greet(_ context.Context, p greetParams) (string, error) {
+	return "hello " + p.Name, nil
+}
+
 // ExampleClient_Call makes a one-line method call: params are marshaled,
 // the id is generated, and the result is decoded into the target.
 func ExampleClient_Call() {
 	s := jsonrpc.NewServer()
-	s.Register("greet", func(_ context.Context, name string) (string, error) {
-		return "hello " + name, nil
-	})
+	s.Register("greet", greet)
 
 	c := jsonrpc.NewClient(s.Sender())
 
 	var greeting string
-	if err := c.Call(context.Background(), "greet", "world", &greeting); err != nil {
+	if err := c.Call(context.Background(), "greet", greetParams{Name: "world"}, &greeting); err != nil {
 		fmt.Println("call failed:", err)
 		return
 	}
@@ -55,13 +64,15 @@ func ExampleClient_Call() {
 // through an in-process Server.
 func ExampleClient_Send() {
 	s := jsonrpc.NewServer()
-	s.Register("greet", func(_ context.Context, name string) (string, error) {
-		return "hello " + name, nil
-	})
+	s.Register("greet", greet)
 
 	c := jsonrpc.NewClient(s.Sender())
 
-	params, _ := jsonrpc.NewParams("world")
+	params, err := jsonrpc.NewParams(greetParams{Name: "world"})
+	if err != nil {
+		fmt.Println("bad params:", err)
+		return
+	}
 	resp, err := c.Send(context.Background(), jsonrpc.NewRequest("greet", params, jsonrpc.NewID(1)))
 	if err != nil {
 		fmt.Println("transport error:", err)
@@ -77,15 +88,13 @@ func ExampleClient_Send() {
 	// Output: hello world
 }
 
-// ExampleMiddleware shows a cross-cutting concern composed with a typed
-// handler. The middleware operates on raw params, so it works without
-// touching the typed pipeline.
+// ExampleMiddleware composes a cross-cutting concern with a typed handler. The
+// middleware operates on raw params, so it never touches the typed pipeline.
 func ExampleMiddleware() {
-	// logging is reusable middleware: it knows nothing about the handler's
-	// parameter or result types. The returned func literal converts to
-	// Handler automatically — no cast needed.
-	logging := func(next jsonrpc.Handler) jsonrpc.Handler {
-		return func(ctx context.Context, params jsontext.Value) (jsontext.Value, *jsonrpc.Error) {
+	// logging knows nothing about the handler's parameter or result types. The
+	// returned func literal converts to RawHandler with no cast.
+	logging := func(next jsonrpc.RawHandler) jsonrpc.RawHandler {
+		return func(ctx context.Context, params jsontext.Value) (jsontext.Value, error) {
 			fmt.Printf("calling with params: %s\n", params)
 			return next(ctx, params)
 		}
@@ -112,8 +121,8 @@ func ExampleMiddleware() {
 // transport adapters that work in raw messages.
 func ExampleServer_ServeMessage() {
 	s := jsonrpc.NewServer()
-	// params arrives as an object or an array — the spec allows no other
-	// shape — so a typed handler takes a struct or a slice, not a bare string.
+	// The spec allows params to be an object or an array only, so a typed
+	// handler takes a struct or a slice, not a bare string.
 	s.Register("echo", func(_ context.Context, p struct {
 		Msg string `json:"msg"`
 	}) (string, error) {
@@ -126,34 +135,84 @@ func ExampleServer_ServeMessage() {
 	// Output: {"jsonrpc":"2.0","result":"ping","id":1}
 }
 
-// ExampleServer_SetRequestDecoder replaces the request decoder to control the
-// errors reported for a bad envelope. This one delegates to the package
-// default and then enriches its error, keeping the code and message the
-// default chose while adding the offending message to Data.
-func ExampleServer_SetRequestDecoder() {
-	type errorData struct {
-		Got string `json:"got"`
+// ExampleServer_SetOptions installs json/v2 options every typed method decodes
+// and marshals with. Here a marshaler renders time.Time as Unix seconds without
+// the result type carrying a MarshalJSONTo method of its own.
+func ExampleServer_SetOptions() {
+	s := jsonrpc.NewServer()
+	s.SetOptions(json.WithMarshalers(
+		json.MarshalToFunc(func(e *jsontext.Encoder, t time.Time) error {
+			return e.WriteToken(jsontext.Int(t.Unix()))
+		}),
+	))
+	s.Register("epoch", func(_ context.Context, _ struct{}) (struct {
+		At time.Time `json:"at"`
+	}, error) {
+		return struct {
+			At time.Time `json:"at"`
+		}{At: time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)}, nil
+	})
+
+	out, _ := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"epoch","id":1}`))
+	fmt.Println(string(out))
+	// Output: {"jsonrpc":"2.0","result":{"at":1257894000},"id":1}
+}
+
+// ExampleClient_SetOptions gives the client the inverse of the wire form the
+// server installed, so an in-process pair agrees on Unix seconds.
+func ExampleClient_SetOptions() {
+	type stamp struct {
+		At time.Time `json:"at"`
 	}
+	epochSeconds := json.JoinOptions(
+		json.WithMarshalers(json.MarshalToFunc(func(e *jsontext.Encoder, t time.Time) error {
+			return e.WriteToken(jsontext.Int(t.Unix()))
+		})),
+		json.WithUnmarshalers(json.UnmarshalFromFunc(func(d *jsontext.Decoder, t *time.Time) error {
+			var sec int64
+			if err := json.UnmarshalDecode(d, &sec); err != nil {
+				return err
+			}
+			*t = time.Unix(sec, 0).UTC()
+			return nil
+		})),
+	)
 
 	s := jsonrpc.NewServer()
-	s.SetRequestDecoder(func(data jsontext.Value, req *jsonrpc.Request) error {
-		err := jsonrpc.DecodeRequest(data, req)
-		e, ok := errors.AsType[*jsonrpc.Error](err)
-		if !ok {
-			// Not a classified error: let the server classify it.
-			return err
+	s.SetOptions(epochSeconds)
+	s.Register("echo", func(_ context.Context, p stamp) (stamp, error) { return p, nil })
+
+	c := jsonrpc.NewClient(s.Sender())
+	c.SetOptions(epochSeconds) // without this the params go out as RFC 3339
+
+	var got stamp
+	if err := c.Call(context.Background(), "echo", stamp{At: time.Unix(1257894000, 0)}, &got); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(got.At.UTC())
+	// Output: 2009-11-10 23:00:00 +0000 UTC
+}
+
+// ExampleServer_SetErrorHandler keeps an unclassified failure's detail off the
+// wire. Errors the library classified arrive as *jsonrpc.Error and are already
+// safe to send; anything else becomes a fixed message.
+func ExampleServer_SetErrorHandler() {
+	s := jsonrpc.NewServer()
+	s.SetErrorHandler(func(_ context.Context, req *jsonrpc.Request, err error) *jsonrpc.Error {
+		if e, ok := errors.AsType[*jsonrpc.Error](err); ok && e != nil {
+			return e
 		}
-		// Returning an *Error hands the client exactly this object.
-		return jsonrpc.NewError(e.Code, e.Message).MustSetData(errorData{Got: string(data)})
+		fmt.Printf("log: rpc %s failed: %v\n", req.Method, err)
+		return jsonrpc.NewError(jsonrpc.CodeInternalError, "internal error")
 	})
-	s.Register("add", func(_ context.Context, p struct {
-		A, B int
-	}) (int, error) {
-		return p.A + p.B, nil
+	s.Register("lookup", func(_ context.Context, _ struct{}) (string, error) {
+		return "", errors.New("dial postgres://user:hunter2@db: connection refused")
 	})
 
-	out, _ := s.ServeMessage(context.Background(),
-		[]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`))
+	out, _ := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"lookup","id":1}`))
 	fmt.Println(string(out))
-	// Output: {"jsonrpc":"2.0","error":{"code":-32600,"message":"unknown member: surprise","data":{"got":"{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"surprise\":true,\"id\":1}"}},"id":null}
+	// Output:
+	// log: rpc lookup failed: dial postgres://user:hunter2@db: connection refused
+	// {"jsonrpc":"2.0","error":{"code":-32603,"message":"internal error"},"id":1}
 }
