@@ -1,8 +1,8 @@
 package jsonrpc
 
 import (
-	"encoding/json"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 )
 

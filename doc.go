@@ -56,6 +56,12 @@
 // The envelope decode walks tokens, so only jsontext-level options reach it.
 // Omitted params yield the zero P without consulting any unmarshaler.
 //
+// Client.SetOptions is the mirror on the other side of the wire, covering the
+// params Client.Call and Client.Notify marshal and the result Call decodes, so
+// a wire form a server installs is one a client can speak. It must be called
+// before either, and Client.Send is outside it: the Request is already built,
+// and the envelope is the Sender's to encode.
+//
 // # Errors
 //
 // Handler and RawHandler return a plain error. An *Error names the code,
@@ -80,7 +86,8 @@
 // Client wraps a Sender, which round-trips a Request to a Response over some
 // transport: Server.Sender in-process, jsonrpchttp over HTTP, or your own.
 // Client.Call marshals params, sends, and decodes the result, returning
-// server-reported errors as *Error; Client.Notify sends a notification. For
+// server-reported errors as *Error; Client.Notify sends a notification.
+// Client.SetOptions gives both the same json/v2 options the server uses. For
 // full control build a Request with NewRequest or NewNotification and send it
 // with Client.Send.
 //

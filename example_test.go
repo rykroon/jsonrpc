@@ -148,6 +148,42 @@ func ExampleServer_SetOptions() {
 	// Output: {"jsonrpc":"2.0","result":{"at":1257894000},"id":1}
 }
 
+// ExampleClient_SetOptions gives the client the inverse of the wire form the
+// server installed, so an in-process pair agrees on Unix seconds.
+func ExampleClient_SetOptions() {
+	type stamp struct {
+		At time.Time `json:"at"`
+	}
+	epochSeconds := json.JoinOptions(
+		json.WithMarshalers(json.MarshalToFunc(func(e *jsontext.Encoder, t time.Time) error {
+			return e.WriteToken(jsontext.Int(t.Unix()))
+		})),
+		json.WithUnmarshalers(json.UnmarshalFromFunc(func(d *jsontext.Decoder, t *time.Time) error {
+			var sec int64
+			if err := json.UnmarshalDecode(d, &sec); err != nil {
+				return err
+			}
+			*t = time.Unix(sec, 0).UTC()
+			return nil
+		})),
+	)
+
+	s := jsonrpc.NewServer()
+	s.SetOptions(epochSeconds)
+	s.Register("echo", func(_ context.Context, p stamp) (stamp, error) { return p, nil })
+
+	c := jsonrpc.NewClient(s.Sender())
+	c.SetOptions(epochSeconds) // without this the params go out as RFC 3339
+
+	var got stamp
+	if err := c.Call(context.Background(), "echo", stamp{At: time.Unix(1257894000, 0)}, &got); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(got.At.UTC())
+	// Output: 2009-11-10 23:00:00 +0000 UTC
+}
+
 // ExampleServer_SetErrorHandler keeps an unclassified failure's detail off the
 // wire. Errors the library classified arrive as *jsonrpc.Error and are already
 // safe to send; anything else becomes a fixed message.

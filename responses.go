@@ -42,12 +42,12 @@ func NewErrorResponse(err *Error, id jsontext.Value) *Response {
 	return &Response{JSONRPC: Version, Error: err, ID: id}
 }
 
-// Decode unmarshals r.Result into into. Check r.Error first.
-func (r Response) Decode(into any) error {
+// Decode unmarshals r.Result into into under opts. Check r.Error first.
+func (r Response) Decode(into any, opts ...json.Options) error {
 	if into == nil || len(r.Result) == 0 {
 		return nil
 	}
-	return json.Unmarshal(r.Result, into)
+	return json.Unmarshal(r.Result, into, opts...)
 }
 
 // MarshalJSONTo writes the canonical object — Version, result or error, id —

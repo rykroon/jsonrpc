@@ -89,6 +89,22 @@ s.Register("epoch", epoch) // any time.Time in epoch's result uses the marshaler
 `SetOptions` must be called before registering methods. To give one method
 its own options, adapt it yourself: `s.RegisterRaw("m", jsonrpc.Raw(fn, opts))`.
 
+`Client.SetOptions` is the mirror on the other side of the wire, covering the
+params `Call` and `Notify` marshal and the result `Call` decodes, so a client
+can speak the wire form its server installed:
+
+```go
+c := jsonrpc.NewClient(sender)
+c.SetOptions(json.WithUnmarshalers(/* the marshaler's inverse */))
+
+var at time.Time
+c.Call(ctx, "epoch", nil, &at) // decodes the Unix seconds the server sent
+```
+
+It must be called before the first `Call` or `Notify`. `Client.Send` is
+outside it — the `Request` is already built, and the envelope is the
+`Sender`'s to encode.
+
 ## Errors
 
 Everything that can fail returns a plain `error`. Returning a `*jsonrpc.Error`
@@ -126,7 +142,8 @@ as an Internal error carrying the error's message.
   `json.WithUnmarshalers`) that control how every method's params are
   decoded and results encoded. The options are used as given, so an
   unmarshaler for `*Request` or a marshaler for `*Response` takes over the
-  envelope itself.
+  envelope itself. `Client.SetOptions` installs the same policy on the
+  calling side.
 - `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
   requests without touching `jsontext.Value` directly.
 - `Request` — a plain struct with `Params` and `ID` kept as raw JSON. It

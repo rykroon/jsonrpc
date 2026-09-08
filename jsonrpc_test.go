@@ -1535,6 +1535,91 @@ func TestRawWithOptions(t *testing.T) {
 	require.Equal(t, CodeInvalidParams, code)
 }
 
+func TestClientSetOptions(t *testing.T) {
+	// tempOptions is the wire form both sides must agree on: "21.5C", not 21.5.
+	tempOptions := json.JoinOptions(
+		json.WithUnmarshalers(tempUnmarshaler(nil)),
+		json.WithMarshalers(tempMarshaler),
+	)
+	newServer := func() *Server {
+		s := NewServer()
+		s.SetOptions(tempOptions)
+		s.Register("echo", echoTemp)
+		return s
+	}
+
+	t.Run("a client without the options cannot reach the server", func(t *testing.T) {
+		c := NewClient(newServer().Sender())
+		var got tempResult
+		err := c.Call(context.Background(), "echo", tempParams{T: 21.5}, &got)
+		// The client marshals a bare number; the server's unmarshaler wants a string.
+		var e *Error
+		require.ErrorAs(t, err, &e)
+		require.Equal(t, CodeInvalidParams, e.Code)
+	})
+
+	t.Run("matching options round-trip params and result", func(t *testing.T) {
+		c := NewClient(newServer().Sender())
+		c.SetOptions(tempOptions)
+
+		var got tempResult
+		require.NoError(t, c.Call(context.Background(), "echo", tempParams{T: 21.5}, &got))
+		require.Equal(t, temperature(21.5), got.T)
+	})
+
+	t.Run("the options reach the params Notify marshals", func(t *testing.T) {
+		var seen jsontext.Value
+		s := NewServer()
+		s.RegisterRaw("note", func(_ context.Context, params jsontext.Value) (jsontext.Value, error) {
+			seen = params
+			return nil, nil
+		})
+		c := NewClient(s.Sender())
+		c.SetOptions(tempOptions)
+
+		require.NoError(t, c.Notify(context.Background(), "note", tempParams{T: 21.5}))
+		require.JSONEq(t, `{"t":"21.5C"}`, string(seen))
+	})
+}
+
+func TestClientSetOptionsPanicsAfterUse(t *testing.T) {
+	tempOptions := json.WithMarshalers(tempMarshaler)
+	newIdleClient := func() *Client {
+		s := NewServer()
+		s.Register("echo", echoTemp)
+		return NewClient(s.Sender())
+	}
+
+	t.Run("after Call", func(t *testing.T) {
+		c := newIdleClient()
+		require.NoError(t, c.Call(context.Background(), "echo", tempParams{}, nil))
+		require.Panics(t, func() { c.SetOptions(tempOptions) })
+	})
+
+	t.Run("after Notify", func(t *testing.T) {
+		c := newIdleClient()
+		require.NoError(t, c.Notify(context.Background(), "echo", tempParams{}))
+		require.Panics(t, func() { c.SetOptions(tempOptions) })
+	})
+
+	t.Run("Send marshals nothing, so it leaves the options open", func(t *testing.T) {
+		c := newIdleClient()
+		_, err := c.Send(context.Background(), NewRequest("echo", nil, NewID(1)))
+		require.NoError(t, err)
+		require.NotPanics(t, func() { c.SetOptions(tempOptions) })
+	})
+}
+
+// TestErrorDataUsesJSONV2 pins the escaping: v1 would write \u003c here.
+func TestErrorDataUsesJSONV2(t *testing.T) {
+	e := NewError(CodeServerError, "x").MustSetData(map[string]string{"q": "<b>&</b>"})
+	require.Equal(t, `{"q":"<b>&</b>"}`, string(e.Data))
+
+	var out map[string]string
+	require.NoError(t, e.UnmarshalData(&out))
+	require.Equal(t, "<b>&</b>", out["q"])
+}
+
 // errDBUnavailable stands in for an application sentinel a handler wraps and
 // an ErrorHandler recognizes.
 var errDBUnavailable = errors.New("db unavailable")

@@ -127,14 +127,14 @@ func NewID[T ~string | ~int | ~int64 | ~uint64](v T) jsontext.Value {
 	return b
 }
 
-// NewParams marshals v for Request.Params. A nil v returns nil; a
-// jsontext.Value passes through.
-func NewParams(v any) (jsontext.Value, error) {
+// NewParams marshals v for Request.Params under opts. A nil v returns nil; a
+// jsontext.Value passes through untouched, opts included.
+func NewParams(v any, opts ...json.Options) (jsontext.Value, error) {
 	if v == nil {
 		return nil, nil
 	}
 	if raw, ok := v.(jsontext.Value); ok {
 		return raw, nil
 	}
-	return json.Marshal(v)
+	return json.Marshal(v, opts...)
 }
