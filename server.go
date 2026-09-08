@@ -133,6 +133,11 @@ func (s *Server) RegisterRaw(name string, h RawHandler, mw ...Middleware) {
 
 // registerRaw is RegisterRaw with mu held.
 func (s *Server) registerRaw(name string, h RawHandler, mw []Middleware) {
+	// Serve rejects an empty method before the lookup, so such a handler could
+	// never run.
+	if name == "" {
+		panic("jsonrpc: method name must not be empty")
+	}
 	if _, dup := s.methods[name]; dup {
 		panic(fmt.Sprintf("jsonrpc: method %q already registered", name))
 	}

@@ -81,7 +81,12 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 	if err != nil {
 		return fmt.Errorf("jsonrpc: marshal params: %w", err)
 	}
-	resp, err := c.sender.Send(ctx, NewRequest(method, raw, NewID(c.nextID.Add(1))))
+	// The id is a counter, so this cannot fail; report it rather than panic.
+	id, err := NewID(c.nextID.Add(1))
+	if err != nil {
+		return fmt.Errorf("jsonrpc: build id: %w", err)
+	}
+	resp, err := c.sender.Send(ctx, NewRequest(method, raw, id))
 	if err != nil {
 		return err
 	}

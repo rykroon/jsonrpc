@@ -121,10 +121,42 @@ func NewNotification(method string, params jsontext.Value) *Request {
 	return &Request{JSONRPC: Version, Method: method, Params: params}
 }
 
-// NewID returns the JSON encoding of v for Request.ID.
-func NewID[T ~string | ~int | ~int64 | ~uint64](v T) jsontext.Value {
-	b, _ := json.Marshal(v)
-	return b
+// NewID encodes v as a JSON string or number for Request.ID.
+//
+// The constraint fixes the Go kind, not the JSON one: a named type is free to
+// carry a marshaler that fails or writes some other shape, and a string may
+// hold invalid UTF-8, which json/v2 rejects. An id that fails here would be
+// empty, and an empty id is a notification, so the error is returned rather
+// than turning a call into one.
+func NewID[T ~string | ~int | ~int64 | ~uint64](v T) (jsontext.Value, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("jsonrpc: marshal id: %w", err)
+	}
+	raw := jsontext.Value(b)
+	switch raw.Kind() {
+	case '"', '0':
+		return raw, nil
+	}
+	// A null id is legal on the wire for a response to a request whose id could
+	// not be read; it is not something a caller should mint.
+	return nil, fmt.Errorf("jsonrpc: id must be a JSON string or number, got %s", raw.Kind())
+}
+
+// MustNewID is NewID for ids known to be encodable, such as a literal or a
+// counter. It panics on failure.
+//
+// The constraint is narrower than NewID's on purpose: a predeclared type
+// carries no marshaler, so the only way to panic here is a string holding
+// invalid UTF-8. Convert a named type to reach this — MustNewID(string(id))
+// encodes the underlying string and bypasses any marshaler — or use NewID to
+// have the marshaler honored and the error returned.
+func MustNewID[T string | int | int64 | uint64](v T) jsontext.Value {
+	id, err := NewID(v)
+	if err != nil {
+		panic(err.Error())
+	}
+	return id
 }
 
 // NewParams marshals v for Request.Params under opts. A nil v returns nil; a
