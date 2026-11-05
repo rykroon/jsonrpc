@@ -7,6 +7,7 @@ import (
 	"fmt"
 )
 
+// Params is a request's params: a JSON object or array, or zero when absent.
 type Params struct {
 	value jsontext.Value
 }
@@ -16,21 +17,30 @@ var (
 	_ json.UnmarshalerFrom = (*Params)(nil)
 )
 
-func NewParams2(p any, opts ...json.Options) (Params, error) {
-	if p == nil {
+// NewParams marshals v under opts. A nil v gives zero Params (none sent); a
+// Params passes through. The result must be an object or array, as §4.2
+// requires, so a scalar or null (a typed nil marshals to one) is an error.
+func NewParams(v any, opts ...json.Options) (Params, error) {
+	switch v := v.(type) {
+	case nil:
 		return Params{}, nil
+	case Params:
+		return v, nil
 	}
-	b, err := json.Marshal(p, opts...)
+	b, err := json.Marshal(v, opts...)
 	if err != nil {
 		return Params{}, fmt.Errorf("jsonrpc: marshal params: %w", err)
 	}
-	v := jsontext.Value(b)
+	return paramsFromValue(b)
+}
+
+// paramsFromValue checks v's shape and copies it, as v may be a decoder's buffer.
+func paramsFromValue(v jsontext.Value) (Params, error) {
 	switch v.Kind() {
 	case jsontext.KindBeginArray, jsontext.KindBeginObject:
-	default:
-		return Params{}, fmt.Errorf("jsonrpc: params must be a JSON object or array, got %s", v.Kind())
+		return Params{v.Clone()}, nil
 	}
-	return Params{v}, nil
+	return Params{}, fmt.Errorf("jsonrpc: params must be a JSON object or array, got %s", v.Kind())
 }
 
 func (p Params) IsObject() bool {
@@ -45,32 +55,39 @@ func (p Params) IsZero() bool {
 	return len(p.value) == 0
 }
 
+// String returns the params' JSON, or "" when absent.
+func (p Params) String() string {
+	return string(p.value)
+}
+
+// DecodeInto unmarshals the params into v under opts. Absent params leave v
+// untouched, as typed handlers do.
 func (p Params) DecodeInto(v any, opts ...json.Options) error {
 	if p.IsZero() {
-		return nil // absent params: leave v untouched, as typed handlers do
+		return nil
 	}
 	return json.Unmarshal(p.value, v, opts...)
 }
 
+// Map splits an object's members without decoding them.
 func (p Params) Map() (map[string]jsontext.Value, error) {
 	if !p.IsObject() {
 		return nil, errors.New("jsonrpc: params must be a JSON object")
 	}
 	m := map[string]jsontext.Value{}
-	err := p.DecodeInto(&m)
-	if err != nil {
+	if err := p.DecodeInto(&m); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
+// Slice splits an array's elements without decoding them.
 func (p Params) Slice() ([]jsontext.Value, error) {
 	if !p.IsArray() {
 		return nil, errors.New("jsonrpc: params must be a JSON array")
 	}
 	s := []jsontext.Value{}
-	err := p.DecodeInto(&s)
-	if err != nil {
+	if err := p.DecodeInto(&s); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -90,11 +107,10 @@ func (p *Params) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	if err != nil {
 		return err
 	}
-	switch v.Kind() {
-	case jsontext.KindBeginObject, jsontext.KindBeginArray:
-		// ReadValue's buffer is only valid until the next read.
-		p.value = v.Clone()
-		return nil
+	params, err := paramsFromValue(v)
+	if err != nil {
+		return err
 	}
-	return fmt.Errorf("jsonrpc: params must be a JSON object or array, got %s", v.Kind())
+	*p = params
+	return nil
 }

@@ -20,6 +20,8 @@ type integer interface {
 	signed | unsigned
 }
 
+// ID is a request id: a JSON string, number, or null, held as its encoding so
+// IDs compare with ==. The zero ID is absent, which makes a notification.
 type ID struct {
 	raw string
 }
@@ -33,11 +35,13 @@ func newNullID() ID {
 	return ID{"null"}
 }
 
+// NewStringID returns a string id. Invalid UTF-8 becomes U+FFFD.
 func NewStringID(v string) ID {
 	b, _ := jsontext.AppendQuote(nil, v)
 	return ID{string(b)}
 }
 
+// NewIntID returns a numeric id.
 func NewIntID[T integer](v T) ID {
 	if v < 0 {
 		return ID{strconv.FormatInt(int64(v), 10)}
@@ -53,6 +57,7 @@ func (i ID) IsNull() bool {
 	return i.raw == "null"
 }
 
+// String returns the id's JSON, so "1" and 1 differ, or "" when absent.
 func (i ID) String() string {
 	return i.raw
 }
@@ -65,25 +70,33 @@ func (i ID) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return enc.WriteValue(jsontext.Value(i.raw))
 }
 
-// UnmarshalJSONFrom reads a JSON string, number, or null. Strings are
-// re-quoted minimally so differently escaped ids compare equal; numbers are
-// kept verbatim, as canonicalizing would round integers above 2^53.
+// UnmarshalJSONFrom reads a JSON string, number, or null.
 func (i *ID) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	v, err := dec.ReadValue()
 	if err != nil {
 		return err
 	}
+	id, err := idFromValue(v)
+	if err != nil {
+		return err
+	}
+	*i = id
+	return nil
+}
+
+// idFromValue accepts a string, number, or null. Strings are re-quoted
+// minimally so differently escaped ids compare equal; numbers are kept
+// verbatim, as canonicalizing would round integers above 2^53.
+func idFromValue(v jsontext.Value) (ID, error) {
 	switch v.Kind() {
 	case jsontext.KindString:
 		s, err := jsontext.AppendUnquote(nil, v)
 		if err != nil {
-			return fmt.Errorf("jsonrpc: id: %w", err)
+			return ID{}, fmt.Errorf("jsonrpc: id: %w", err)
 		}
-		*i = NewStringID(string(s))
+		return NewStringID(string(s)), nil
 	case jsontext.KindNumber, jsontext.KindNull:
-		*i = ID{string(v)}
-	default:
-		return fmt.Errorf("jsonrpc: id must be a JSON string, number, or null, got %s", v.Kind())
+		return ID{string(v)}, nil
 	}
-	return nil
+	return ID{}, fmt.Errorf("jsonrpc: id must be a JSON string, number, or null, got %s", v.Kind())
 }

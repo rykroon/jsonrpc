@@ -77,16 +77,11 @@ func (c *Client) options() json.Options {
 // error is a transport or decode failure.
 func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
 	opts := c.options()
-	raw, err := NewParams(params, opts)
+	p, err := NewParams(params, opts)
 	if err != nil {
-		return fmt.Errorf("jsonrpc: marshal params: %w", err)
+		return err
 	}
-	// The id is a counter, so this cannot fail; report it rather than panic.
-	id, err := NewID(c.nextID.Add(1))
-	if err != nil {
-		return fmt.Errorf("jsonrpc: build id: %w", err)
-	}
-	resp, err := c.sender.Send(ctx, NewRequest(method, raw, id))
+	resp, err := c.sender.Send(ctx, NewRequest(method, p, NewIntID(c.nextID.Add(1))))
 	if err != nil {
 		return err
 	}
@@ -108,11 +103,11 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 // Notify sends a notification: the server dispatches method but produces no
 // response. The error reports transport failures only.
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
-	raw, err := NewParams(params, c.options())
+	p, err := NewParams(params, c.options())
 	if err != nil {
-		return fmt.Errorf("jsonrpc: marshal params: %w", err)
+		return err
 	}
-	_, err = c.sender.Send(ctx, NewNotification(method, raw))
+	_, err = c.sender.Send(ctx, NewNotification(method, p))
 	return err
 }
 

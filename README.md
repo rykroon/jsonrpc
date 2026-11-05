@@ -144,17 +144,17 @@ as an Internal error carrying the error's message.
   unmarshaler for `*Request` or a marshaler for `*Response` takes over the
   envelope itself. `Client.SetOptions` installs the same policy on the
   calling side.
-- `NewRequest` / `NewNotification` / `NewID` / `NewParams` — construct
-  requests without touching `jsontext.Value` directly. Both constructors
-  enforce the spec on the way out, so a request the far end would reject is
-  an error locally instead. `NewParams` requires an object or an array (§4.2),
-  so a scalar — or a typed nil, which marshals to `null` — fails. `NewID`
-  requires a string or a number, and returns the marshal error rather than an
-  empty id: an empty id is a *notification*, so swallowing that error would
-  turn a call into fire-and-forget. `MustNewID` is the panicking form for
-  literals and counters; its constraint drops the `~`, so a named type with a
-  marshaler cannot reach it and the only way to panic is invalid UTF-8.
-- `Request` — a plain struct with `Params` and `ID` kept as raw JSON. It
+- `NewRequest` / `NewNotification` — construct requests from a `Params` and
+  an `ID`.
+- `Params` / `NewParams` — a request's params. `NewParams` requires an object
+  or an array (§4.2), so a scalar — or a typed nil, which marshals to `null` —
+  fails locally instead of as an Invalid Request from the far end. `nil` gives
+  zero `Params`, which sends none. `DecodeInto`, `Map`, and `Slice` read them.
+- `ID` / `NewStringID` / `NewIntID` — a request id, held as its JSON encoding
+  so ids compare with `==` and work as map keys. The constructors cannot fail;
+  a zero `ID` is a notification. `String` returns the JSON form, so `"1"` and
+  `1` stay distinct.
+- `Request` — a plain struct of `Params` and `ID`. It
   decodes itself with `UnmarshalJSONFrom`, so the strict envelope check applies
   to any `json.Unmarshal` into one, not only the ones a `Server` drives.
 - `Response` — one struct for both shapes the spec allows: exactly one of
