@@ -11,7 +11,15 @@ type Params struct {
 	value jsontext.Value
 }
 
+var (
+	_ json.MarshalerTo     = Params{}
+	_ json.UnmarshalerFrom = (*Params)(nil)
+)
+
 func NewParams2(p any, opts ...json.Options) (Params, error) {
+	if p == nil {
+		return Params{}, nil
+	}
 	b, err := json.Marshal(p, opts...)
 	if err != nil {
 		return Params{}, fmt.Errorf("jsonrpc: marshal params: %w", err)
@@ -38,6 +46,9 @@ func (p Params) IsZero() bool {
 }
 
 func (p Params) DecodeInto(v any, opts ...json.Options) error {
+	if p.IsZero() {
+		return nil // absent params: leave v untouched, as typed handlers do
+	}
 	return json.Unmarshal(p.value, v, opts...)
 }
 
@@ -63,4 +74,27 @@ func (p Params) Slice() ([]jsontext.Value, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// MarshalJSONTo writes the params. Zero Params is an error; tag the field omitzero.
+func (p Params) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if p.IsZero() {
+		return errors.New("jsonrpc: cannot marshal zero Params")
+	}
+	return enc.WriteValue(p.value)
+}
+
+// UnmarshalJSONFrom reads a JSON object or array; null and scalars are errors.
+func (p *Params) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	v, err := dec.ReadValue()
+	if err != nil {
+		return err
+	}
+	switch v.Kind() {
+	case jsontext.KindBeginObject, jsontext.KindBeginArray:
+		// ReadValue's buffer is only valid until the next read.
+		p.value = v.Clone()
+		return nil
+	}
+	return fmt.Errorf("jsonrpc: params must be a JSON object or array, got %s", v.Kind())
 }
