@@ -149,7 +149,7 @@ func TestNotificationUnknownMethodProducesNoResponse(t *testing.T) {
 
 func TestNilResultEncodesAsNull(t *testing.T) {
 	s := NewServer()
-	s.RegisterRaw("void", func(_ context.Context, _ jsontext.Value) (jsontext.Value, error) {
+	s.RegisterRaw("void", func(_ context.Context, _ Params) (jsontext.Value, error) {
 		return nil, nil
 	})
 
@@ -900,7 +900,7 @@ func TestRawWithHandlerValidation(t *testing.T) {
 // letting tests assert ordering of the wrapping.
 func tagMiddleware(name string, log *[]string) Middleware {
 	return func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
+		return func(ctx context.Context, raw Params) (jsontext.Value, error) {
 			*log = append(*log, name)
 			return next(ctx, raw)
 		}
@@ -915,7 +915,7 @@ func TestRegisterMiddlewareRunsBeforeDecode(t *testing.T) {
 	// decoding into P — the concern middleware is for, now that params
 	// validation belongs to the handler.
 	requireAuth := func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
+		return func(ctx context.Context, raw Params) (jsontext.Value, error) {
 			if ctx.Value(authKey{}) != "secret" {
 				return nil, NewError(CodeServerError, "unauthorized")
 			}
@@ -970,7 +970,7 @@ func TestRegisterRejectsEmptyName(t *testing.T) {
 		s.Register("", func(context.Context, struct{}) (int, error) { return 1, nil })
 	})
 	require.Panics(t, func() {
-		s.RegisterRaw("", func(context.Context, jsontext.Value) (jsontext.Value, error) { return nil, nil })
+		s.RegisterRaw("", func(context.Context, Params) (jsontext.Value, error) { return nil, nil })
 	})
 }
 
@@ -1159,9 +1159,9 @@ func TestDefaultDecoderAcceptsBothParamsShapes(t *testing.T) {
 
 func TestDefaultDecoderOmittedParams(t *testing.T) {
 	s := NewServer()
-	var seen jsontext.Value
+	var seen Params
 	called := false
-	s.RegisterRaw("probe", func(_ context.Context, params jsontext.Value) (jsontext.Value, error) {
+	s.RegisterRaw("probe", func(_ context.Context, params Params) (jsontext.Value, error) {
 		seen, called = params, true
 		return jsontext.Value(`"ok"`), nil
 	})
@@ -1174,7 +1174,7 @@ func TestDefaultDecoderOmittedParams(t *testing.T) {
 	resp := decodeResponse(t, out)
 	require.Nil(t, resp.Error)
 	require.True(t, called)
-	require.Nil(t, seen)
+	require.True(t, seen.IsZero())
 }
 
 func TestDecodeErrorEchoesRecoveredID(t *testing.T) {
@@ -1688,9 +1688,9 @@ func TestClientSetOptions(t *testing.T) {
 	})
 
 	t.Run("the options reach the params Notify marshals", func(t *testing.T) {
-		var seen jsontext.Value
+		var seen Params
 		s := NewServer()
-		s.RegisterRaw("note", func(_ context.Context, params jsontext.Value) (jsontext.Value, error) {
+		s.RegisterRaw("note", func(_ context.Context, params Params) (jsontext.Value, error) {
 			seen = params
 			return nil, nil
 		})
@@ -1698,7 +1698,7 @@ func TestClientSetOptions(t *testing.T) {
 		c.SetOptions(tempOptions)
 
 		require.NoError(t, c.Notify(context.Background(), "note", tempParams{T: 21.5}))
-		require.JSONEq(t, `{"t":"21.5C"}`, string(seen))
+		require.JSONEq(t, `{"t":"21.5C"}`, seen.String())
 	})
 }
 
@@ -1871,7 +1871,7 @@ func TestMiddlewareCanWrapErrors(t *testing.T) {
 		return DefaultErrorHandler(ctx, req, err)
 	})
 	s.Use(func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
+		return func(ctx context.Context, raw Params) (jsontext.Value, error) {
 			out, err := next(ctx, raw)
 			if err != nil {
 				return nil, fmt.Errorf("lookup: %w", err)

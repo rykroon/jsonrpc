@@ -40,7 +40,10 @@ Request ids and params have their own types:
 
 A custom `*Request` unmarshaler builds the fields by decoding into them
 (`json.Unmarshal(raw, &req.ID)`) or with `NewParams(jsontext.Value(raw))`.
-`RawHandler` and `Middleware` still receive params as `jsontext.Value`.
+`RawHandler` (and so `Middleware`) receives `Params` rather than
+`jsontext.Value`: `func(ctx, Params) (jsontext.Value, error)`. Read the bytes
+with `params.String()`, decode with `params.DecodeInto`, and build replacement
+params with `NewParams`. The result stays `jsontext.Value`.
 
 Removed, with no replacement needed:
 

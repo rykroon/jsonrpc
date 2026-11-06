@@ -26,7 +26,7 @@ A transport-agnostic JSON-RPC 2.0 library. The root package has no I/O; transpor
 
 ### Dispatch pipeline
 
-Everything registered is stored as a `RawHandler` (`func(ctx, jsontext.Value) (jsontext.Value, error)`). `Server.Register` takes a typed `Handler[P, R]` and converts it with `Raw(fn, s.opts)` (`typed.go`), which decodes params into `P` (failure → Invalid params) and marshals `R`. `Middleware` is `func(RawHandler) RawHandler`, so it works uniformly over typed and raw methods. Composition: server-wide middleware (`Use`) wraps per-method middleware, `mw[0]` outermost.
+Everything registered is stored as a `RawHandler` (`func(ctx, Params) (jsontext.Value, error)`). `Server.Register` takes a typed `Handler[P, R]` and converts it with `Raw(fn, s.opts)` (`typed.go`), which decodes params into `P` (failure → Invalid params) and marshals `R`. `Middleware` is `func(RawHandler) RawHandler`, so it works uniformly over typed and raw methods. Composition: server-wide middleware (`Use`) wraps per-method middleware, `mw[0]` outermost.
 
 `Use`, `SetOptions`, and `SetErrorHandler` all panic once any method is registered — options are captured at registration time.
 
@@ -36,7 +36,7 @@ Handlers return a plain `error`. An `*Error` means "already classified, send as-
 
 ### Wire format and validation
 
-- All JSON uses `encoding/json/v2` and `jsontext`. `Result` and `Error.Data` are `jsontext.Value`; `Params` (`params.go`) wraps an object/array value, and `ID` (`id.go`) holds its JSON encoding in a `string` so IDs compare with `==`. `RawHandler` still receives params as `jsontext.Value`.
+- All JSON uses `encoding/json/v2` and `jsontext`. `Result` and `Error.Data` are `jsontext.Value`; `Params` (`params.go`) wraps an object/array value, and `ID` (`id.go`) holds its JSON encoding in a `string` so IDs compare with `==`.
 - `Request.UnmarshalJSONFrom` (`requests.go`) is a hand-written token walk that enforces the spec strictly: unknown envelope members, duplicate names, non-structured or `null` params are Invalid Request. Unknown members *inside* params are tolerated.
 - `Response.MarshalJSONTo` / `UnmarshalJSONFrom` (`responses.go`) enforce "exactly one of result/error, id always present".
 - Constructors enforce the spec on the sending side too: `NewParams` requires object/array; `NewStringID`/`NewIntID` cannot fail. A zero `ID` means notification, so it must never be produced silently.

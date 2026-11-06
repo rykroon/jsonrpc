@@ -12,12 +12,12 @@ import (
 // Handler is a typed method: decoded params P in, result R or an error out.
 type Handler[P, R any] func(context.Context, P) (R, error)
 
-// RawHandler is the dispatch contract: raw params bytes (possibly empty) in,
+// RawHandler is the dispatch contract: undecoded params (zero when absent) in,
 // result bytes or an error out. A nil result encodes as `"result":null`.
 //
 // An *Error is sent as-is; any other error goes to the ErrorHandler, so
 // wrapping with %w is fine.
-type RawHandler func(ctx context.Context, params jsontext.Value) (jsontext.Value, error)
+type RawHandler func(ctx context.Context, params Params) (jsontext.Value, error)
 
 // Middleware wraps a RawHandler. mw[0] is outermost.
 type Middleware func(next RawHandler) RawHandler
@@ -172,7 +172,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method)), req.ID)
 	}
 
-	result, err := h(ctx, req.Params.value)
+	result, err := h(ctx, req.Params)
 	if req.IsNotification() {
 		// No reply, but the ErrorHandler still runs so it can log.
 		if err != nil {

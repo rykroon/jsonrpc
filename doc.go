@@ -6,7 +6,7 @@
 //
 //   - Server.Register installs a Handler — func(context.Context, P) (R, error)
 //     — under a method name. This is the normal way to write a method.
-//   - Server.RegisterRaw installs a RawHandler, working in raw bytes.
+//   - Server.RegisterRaw installs a RawHandler, working on undecoded Params.
 //   - Server.SetErrorHandler decides what every failure looks like on the wire.
 //   - Server.Serve dispatches one decoded Request. Server.ServeMessage parses
 //     raw bytes first, batches included, for transports like WebSocket or

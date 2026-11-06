@@ -13,12 +13,10 @@ import (
 // failed result marshal. Install the result with Server.RegisterRaw to give
 // one method its own options.
 func Raw[P, R any](fn Handler[P, R], opts ...json.Options) RawHandler {
-	return func(ctx context.Context, raw jsontext.Value) (jsontext.Value, error) {
+	return func(ctx context.Context, params Params) (jsontext.Value, error) {
 		var p P
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &p, opts...); err != nil {
-				return nil, NewError(CodeInvalidParams, err.Error())
-			}
+		if err := params.DecodeInto(&p, opts...); err != nil {
+			return nil, NewError(CodeInvalidParams, err.Error())
 		}
 		r, err := fn(ctx, p)
 		if err != nil {
