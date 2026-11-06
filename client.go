@@ -73,20 +73,27 @@ func (c *Client) options() json.Options {
 
 // Call invokes method with params (marshaled by NewParams) and decodes the
 // reply into result; a nil result skips decoding. The id comes from an internal
-// counter. Errors reported by the server are returned as *Error; any other
-// error is a transport or decode failure.
+// counter, and a response carrying a different id is an error. Errors reported
+// by the server are returned as *Error; any other error is a transport or
+// decode failure.
 func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
 	opts := c.options()
 	p, err := NewParams(params, opts)
 	if err != nil {
 		return err
 	}
-	resp, err := c.sender.Send(ctx, NewRequest(method, p, NewIntID(c.nextID.Add(1))))
+	id := NewIntID(c.nextID.Add(1))
+	resp, err := c.sender.Send(ctx, NewRequest(method, p, id))
 	if err != nil {
 		return err
 	}
 	if resp == nil {
 		return fmt.Errorf("jsonrpc: transport returned no response for call %q", method)
+	}
+	// Another call's result must not decode as this one's. A null id is
+	// allowed on an error: the server could not read ours.
+	if resp.ID != id && !(resp.ID.IsNull() && resp.Error != nil) {
+		return fmt.Errorf("jsonrpc: response id %s does not match request id %s for call %q", resp.ID, id, method)
 	}
 	if resp.Error != nil {
 		return resp.Error

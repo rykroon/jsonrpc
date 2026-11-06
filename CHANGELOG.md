@@ -70,6 +70,10 @@ Removed, with no replacement needed:
   is what a typed nil marshals to), or an empty value is now an error at the
   call site instead of an Invalid Request from the far end. A `jsontext.Value`
   argument is now validated rather than passed through unchecked.
+- **`Client.Call` checks the response id.** A response whose id differs from
+  the request's is an error rather than a result, so a misbehaving `Sender` or
+  server cannot hand one call another's reply. A null id is still accepted on
+  an error response, since that is how a server says it could not read the id.
 - **A request whose id is not a string, number, or null fails to decode** as
   Invalid Request, rather than decoding and being rejected by `Serve`. The
   response is the same: Invalid Request with a null id.

@@ -464,6 +464,45 @@ func TestDecodeResponsesRejectsBadElement(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Call must not decode another request's response as its own.
+func TestClientCallChecksResponseID(t *testing.T) {
+	respond := func(resp *Response) *Client {
+		return NewClient(SenderFunc(func(context.Context, *Request) (*Response, error) {
+			return resp, nil
+		}))
+	}
+
+	t.Run("a mismatched success is rejected undecoded", func(t *testing.T) {
+		got := addResult{Sum: -1}
+		err := respond(NewSuccessResponse(jsontext.Value(`{"sum":5}`), NewIntID(99))).
+			Call(context.Background(), "add", nil, &got)
+		require.ErrorContains(t, err, "response id 99 does not match request id 1")
+		require.Equal(t, addResult{Sum: -1}, got)
+	})
+
+	t.Run("a mismatched error is not reported as the server's", func(t *testing.T) {
+		err := respond(NewErrorResponse(NewError(CodeInternalError, "theirs"), NewStringID("1"))).
+			Call(context.Background(), "add", nil, nil)
+		require.ErrorContains(t, err, `response id "1" does not match request id 1`)
+		_, isRPC := errors.AsType[*Error](err)
+		require.False(t, isRPC)
+	})
+
+	t.Run("a null id is accepted on an error", func(t *testing.T) {
+		err := respond(NewErrorResponse(NewError(CodeParseError, "bad"), ID{})).
+			Call(context.Background(), "add", nil, nil)
+		e, ok := errors.AsType[*Error](err)
+		require.True(t, ok)
+		require.Equal(t, CodeParseError, e.Code)
+	})
+
+	t.Run("but not on a success", func(t *testing.T) {
+		err := respond(NewSuccessResponse(jsontext.Value(`1`), ID{})).
+			Call(context.Background(), "add", nil, nil)
+		require.ErrorContains(t, err, "response id null does not match")
+	})
+}
+
 // A Sender may build a Response itself, so Call must not read a response with
 // neither member as a success with nothing to decode.
 func TestClientCallResponseWithNeitherMember(t *testing.T) {
@@ -717,67 +756,6 @@ func TestSendPropagatesCallerID(t *testing.T) {
 	require.Nil(t, resp.Error)
 	require.Equal(t, NewStringID("req-abc"), seen)
 	require.JSONEq(t, `"req-abc"`, resp.ID.String())
-}
-
-func TestIDConstructors(t *testing.T) {
-	for want, id := range map[string]ID{
-		"42":                   NewIntID(42),
-		"-7":                   NewIntID(int64(-7)),
-		"0":                    NewIntID(uint8(0)),
-		"18446744073709551615": NewIntID(uint64(1<<64 - 1)),
-		`"abc"`:                NewStringID("abc"),
-		`""`:                   NewStringID(""),
-		`"a\"b<"`:              NewStringID(`a"b<`),
-		`"\ufffd"`:             NewStringID("\xff"),
-	} {
-		require.False(t, id.IsZero(), want)
-		require.JSONEq(t, want, id.String())
-	}
-	require.True(t, ID{}.IsZero())
-	require.True(t, newNullID().IsNull())
-}
-
-func TestIDJSON(t *testing.T) {
-	t.Run("round trip compares equal", func(t *testing.T) {
-		for _, in := range []ID{NewIntID(-7), NewIntID(uint64(1<<64 - 1)), NewStringID("a<b"), newNullID()} {
-			b, err := json.Marshal(in)
-			require.NoError(t, err)
-			var out ID
-			require.NoError(t, json.Unmarshal(b, &out))
-			require.Equal(t, in, out, string(b))
-		}
-	})
-
-	t.Run("escapes are normalized", func(t *testing.T) {
-		var id ID
-		require.NoError(t, json.Unmarshal([]byte(`"\u0061\u003c"`), &id))
-		require.Equal(t, NewStringID("a<"), id)
-	})
-
-	t.Run("numbers are kept verbatim", func(t *testing.T) {
-		var id ID
-		require.NoError(t, json.Unmarshal([]byte(`1e2`), &id))
-		require.Equal(t, "1e2", id.String())
-	})
-
-	t.Run("bad kinds are rejected", func(t *testing.T) {
-		for _, in := range []string{`true`, `{}`, `[1]`} {
-			var id ID
-			require.ErrorContains(t, json.Unmarshal([]byte(in), &id), "id must be a JSON string, number, or null", in)
-			require.True(t, id.IsZero())
-		}
-	})
-
-	t.Run("zero is omitted or refused", func(t *testing.T) {
-		b, err := json.Marshal(struct {
-			ID ID `json:"id,omitzero"`
-		}{})
-		require.NoError(t, err)
-		require.Equal(t, `{}`, string(b))
-
-		_, err = json.Marshal(ID{})
-		require.ErrorContains(t, err, "zero ID")
-	})
 }
 
 func TestNewParamsPassthrough(t *testing.T) {

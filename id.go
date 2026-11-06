@@ -8,18 +8,6 @@ import (
 	"strconv"
 )
 
-type signed interface {
-	~int | ~int8 | ~int16 | ~int32 | ~int64
-}
-
-type unsigned interface {
-	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64
-}
-
-type integer interface {
-	signed | unsigned
-}
-
 // ID is a request id: a JSON string, number, or null, held as its encoding so
 // IDs compare with ==. The zero ID is absent, which makes a notification.
 type ID struct {
@@ -42,7 +30,7 @@ func NewStringID(v string) ID {
 }
 
 // NewIntID returns a numeric id.
-func NewIntID[T integer](v T) ID {
+func NewIntID[T ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v T) ID {
 	if v < 0 {
 		return ID{strconv.FormatInt(int64(v), 10)}
 	}
