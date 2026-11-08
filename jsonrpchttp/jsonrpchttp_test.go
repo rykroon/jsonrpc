@@ -43,7 +43,7 @@ func TestHandlerRoundTrip(t *testing.T) {
 	params, err := jsonrpc.NewParams(addOneParams{N: 7})
 	require.NoError(t, err)
 
-	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", params, jsonrpc.NewIntID(1)))
+	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", params, jsonrpc.IntID(1)))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Nil(t, resp.Error)
@@ -84,7 +84,7 @@ func TestSenderNotificationReturnsNil(t *testing.T) {
 func TestHandlerReturnsMethodNotFound(t *testing.T) {
 	_, client := newTestHTTP(t)
 
-	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("missing", jsonrpc.Params{}, jsonrpc.NewStringID("x")))
+	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("missing", jsonrpc.Params{}, jsonrpc.StringID("x")))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
@@ -171,7 +171,7 @@ func TestSenderRejectsNon2xxStatus(t *testing.T) {
 	defer ts.Close()
 	client := jsonrpc.NewClient(&jsonrpchttp.Sender{URL: ts.URL})
 
-	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", jsonrpc.Params{}, jsonrpc.NewIntID(1)))
+	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", jsonrpc.Params{}, jsonrpc.IntID(1)))
 	require.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "502")

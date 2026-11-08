@@ -22,7 +22,7 @@ func ExampleServer() {
 	})
 
 	params, _ := jsonrpc.NewParams(jsontext.Value(`{"a":2,"b":3}`))
-	resp := s.Serve(context.Background(), jsonrpc.NewRequest("add", params, jsonrpc.NewIntID(1)))
+	resp := s.Serve(context.Background(), jsonrpc.NewRequest("add", params, jsonrpc.IntID(1)))
 	out, _ := json.Marshal(resp)
 	fmt.Println(string(out))
 	// Output: {"jsonrpc":"2.0","result":5,"id":1}
@@ -68,7 +68,7 @@ func ExampleClient_Send() {
 		fmt.Println("bad params:", err)
 		return
 	}
-	resp, err := c.Send(context.Background(), jsonrpc.NewRequest("greet", params, jsonrpc.NewIntID(1)))
+	resp, err := c.Send(context.Background(), jsonrpc.NewRequest("greet", params, jsonrpc.IntID(1)))
 	if err != nil {
 		fmt.Println("transport error:", err)
 		return

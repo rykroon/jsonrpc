@@ -9,25 +9,25 @@ import (
 
 func TestIDConstructors(t *testing.T) {
 	for want, id := range map[string]ID{
-		"42":                   NewIntID(42),
-		"-7":                   NewIntID(int64(-7)),
-		"0":                    NewIntID(uint8(0)),
-		"18446744073709551615": NewIntID(uint64(1<<64 - 1)),
-		`"abc"`:                NewStringID("abc"),
-		`""`:                   NewStringID(""),
-		`"a\"b<"`:              NewStringID(`a"b<`),
-		`"\ufffd"`:             NewStringID("\xff"),
+		"42":                   IntID(42),
+		"-7":                   IntID(int64(-7)),
+		"0":                    IntID(uint8(0)),
+		"18446744073709551615": IntID(uint64(1<<64 - 1)),
+		`"abc"`:                StringID("abc"),
+		`""`:                   StringID(""),
+		`"a\"b<"`:              StringID(`a"b<`),
+		`"\ufffd"`:             StringID("\xff"),
 	} {
 		require.False(t, id.IsZero(), want)
 		require.JSONEq(t, want, id.String())
 	}
 	require.True(t, ID{}.IsZero())
-	require.True(t, newNullID().IsNull())
+	require.True(t, nullID().IsNull())
 }
 
 func TestIDJSON(t *testing.T) {
 	t.Run("round trip compares equal", func(t *testing.T) {
-		for _, in := range []ID{NewIntID(-7), NewIntID(uint64(1<<64 - 1)), NewStringID("a<b"), newNullID()} {
+		for _, in := range []ID{IntID(-7), IntID(uint64(1<<64 - 1)), StringID("a<b"), nullID()} {
 			b, err := json.Marshal(in)
 			require.NoError(t, err)
 			var out ID
@@ -39,7 +39,7 @@ func TestIDJSON(t *testing.T) {
 	t.Run("escapes are normalized", func(t *testing.T) {
 		var id ID
 		require.NoError(t, json.Unmarshal([]byte(`"\u0061\u003c"`), &id))
-		require.Equal(t, NewStringID("a<"), id)
+		require.Equal(t, StringID("a<"), id)
 	})
 
 	t.Run("numbers are kept verbatim", func(t *testing.T) {

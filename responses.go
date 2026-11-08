@@ -29,7 +29,7 @@ func NewSuccessResponse(result jsontext.Value, id ID) *Response {
 		result = jsontext.Value("null")
 	}
 	if id.IsZero() {
-		id = newNullID()
+		id = nullID()
 	}
 	return &Response{JSONRPC: Version, Result: result, ID: id}
 }
@@ -37,7 +37,7 @@ func NewSuccessResponse(result jsontext.Value, id ID) *Response {
 // NewErrorResponse builds a Response; a zero id becomes null.
 func NewErrorResponse(err *Error, id ID) *Response {
 	if id.IsZero() {
-		id = newNullID()
+		id = nullID()
 	}
 	return &Response{JSONRPC: Version, Error: err, ID: id}
 }
@@ -91,7 +91,7 @@ func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 	}
 	id := r.ID
 	if id.IsZero() {
-		id = newNullID()
+		id = nullID()
 	}
 	if err := enc.WriteValue(jsontext.Value(id.raw)); err != nil {
 		return err

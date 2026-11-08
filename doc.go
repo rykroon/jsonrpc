@@ -108,7 +108,7 @@
 // The two the spec does constrain have their own types. Params holds an
 // object or array, or is zero when absent; NewParams enforces the shape. ID
 // holds a string, number, or null as its JSON encoding, so ids compare with ==
-// and work as map keys; NewStringID and NewIntID cannot fail. A zero ID is
+// and work as map keys; StringID and IntID cannot fail. A zero ID is
 // how IsNotification decides.
 //
 // # Not included

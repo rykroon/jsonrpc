@@ -150,7 +150,7 @@ as an Internal error carrying the error's message.
   or an array (§4.2), so a scalar — or a typed nil, which marshals to `null` —
   fails locally instead of as an Invalid Request from the far end. `nil` gives
   zero `Params`, which sends none. `DecodeInto`, `Map`, and `Slice` read them.
-- `ID` / `NewStringID` / `NewIntID` — a request id, held as its JSON encoding
+- `ID` / `StringID` / `IntID` — a request id, held as its JSON encoding
   so ids compare with `==` and work as map keys. The constructors cannot fail;
   a zero `ID` is a notification. `String` returns the JSON form, so `"1"` and
   `1` stay distinct.

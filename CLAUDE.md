@@ -39,7 +39,7 @@ Handlers return a plain `error`. An `*Error` means "already classified, send as-
 - All JSON uses `encoding/json/v2` and `jsontext`. `Result` and `Error.Data` are `jsontext.Value`; `Params` (`params.go`) wraps an object/array value, and `ID` (`id.go`) holds its JSON encoding in a `string` so IDs compare with `==`.
 - `Request.UnmarshalJSONFrom` (`requests.go`) is a hand-written token walk that enforces the spec strictly: unknown envelope members, duplicate names, non-structured or `null` params are Invalid Request. Unknown members *inside* params are tolerated.
 - `Response.MarshalJSONTo` / `UnmarshalJSONFrom` (`responses.go`) enforce "exactly one of result/error, id always present".
-- Constructors enforce the spec on the sending side too: `NewParams` requires object/array; `NewStringID`/`NewIntID` cannot fail. A zero `ID` means notification, so it must never be produced silently.
+- Constructors enforce the spec on the sending side too: `NewParams` requires object/array; `StringID`/`IntID` cannot fail. A zero `ID` means notification, so it must never be produced silently.
 - `Server.SetOptions` / `Client.SetOptions` options are passed through as-is, so a user-installed unmarshaler for `*Request` or marshaler for `*Response` replaces the envelope codec.
 
 ## Conventions

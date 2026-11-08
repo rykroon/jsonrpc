@@ -19,18 +19,18 @@ var (
 	_ json.UnmarshalerFrom = (*ID)(nil)
 )
 
-func newNullID() ID {
+func nullID() ID {
 	return ID{"null"}
 }
 
-// NewStringID returns a string id. Invalid UTF-8 becomes U+FFFD.
-func NewStringID(v string) ID {
+// StringID returns a string id. Invalid UTF-8 becomes U+FFFD.
+func StringID(v string) ID {
 	b, _ := jsontext.AppendQuote(nil, v)
 	return ID{string(b)}
 }
 
-// NewIntID returns a numeric id.
-func NewIntID[T ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v T) ID {
+// IntID returns a numeric id.
+func IntID[T ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v T) ID {
 	if v < 0 {
 		return ID{strconv.FormatInt(int64(v), 10)}
 	}
@@ -82,7 +82,7 @@ func idFromValue(v jsontext.Value) (ID, error) {
 		if err != nil {
 			return ID{}, fmt.Errorf("jsonrpc: id: %w", err)
 		}
-		return NewStringID(string(s)), nil
+		return StringID(string(s)), nil
 	case jsontext.KindNumber, jsontext.KindNull:
 		return ID{string(v)}, nil
 	}

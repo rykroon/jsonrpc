@@ -113,7 +113,7 @@ func tokenError(err error) *Error {
 	return NewError(CodeParseError, err.Error())
 }
 
-// NewRequest assembles a Request; see NewParams, NewStringID, and NewIntID.
+// NewRequest assembles a Request; see NewParams, StringID, and IntID.
 func NewRequest(method string, params Params, id ID) *Request {
 	return &Request{JSONRPC: Version, Method: method, Params: params, ID: id}
 }

@@ -82,7 +82,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 	if err != nil {
 		return err
 	}
-	id := NewIntID(c.nextID.Add(1))
+	id := IntID(c.nextID.Add(1))
 	resp, err := c.sender.Send(ctx, NewRequest(method, p, id))
 	if err != nil {
 		return err
