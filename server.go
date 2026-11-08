@@ -12,12 +12,12 @@ import (
 // Handler is a typed method: decoded params P in, result R or an error out.
 type Handler[P, R any] func(context.Context, P) (R, error)
 
-// RawHandler is the dispatch contract: raw params bytes (possibly empty) in,
+// RawHandler is the dispatch contract: undecoded params (zero when absent) in,
 // result bytes or an error out. A nil result encodes as `"result":null`.
 //
 // An *Error is sent as-is; any other error goes to the ErrorHandler, so
 // wrapping with %w is fine.
-type RawHandler func(ctx context.Context, params jsontext.Value) (jsontext.Value, error)
+type RawHandler func(ctx context.Context, params Params) (jsontext.Value, error)
 
 // Middleware wraps a RawHandler. mw[0] is outermost.
 type Middleware func(next RawHandler) RawHandler
@@ -154,10 +154,6 @@ func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middlew
 // Serve dispatches one request. A notification runs but returns nil. Handler
 // panics are not recovered.
 func (s *Server) Serve(ctx context.Context, req *Request) *Response {
-	// Validate the id first so later error responses never echo an invalid one.
-	if !req.IsNotification() && !isValidID(req.ID) {
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, "id must be a string, number, or null")), nil)
-	}
 	if req.JSONRPC != Version {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`)), req.ID)
 	}
@@ -203,7 +199,8 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	var req Request
 	if err := s.decode(data, &req); err != nil {
 		e := s.handleError(ctx, &req, classifyDecodeError(err))
-		return s.marshalMessageError(e, recoveredID(&req))
+		// An id read before the failure lets the client correlate.
+		return s.marshalMessageError(e, req.ID)
 	}
 	resp := s.Serve(ctx, &req)
 	if resp == nil {
@@ -219,17 +216,17 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	opts := s.options()
 	var elems []jsontext.Value
 	if err := json.Unmarshal(data, &elems, json.JoinOptions(opts, jsontext.AllowDuplicateNames(true))); err != nil {
-		return s.marshalMessageError(s.handleError(ctx, nil, NewError(CodeParseError, err.Error())), nil)
+		return s.marshalMessageError(s.handleError(ctx, nil, NewError(CodeParseError, err.Error())), ID{})
 	}
 	if len(elems) == 0 {
-		return s.marshalMessageError(s.handleError(ctx, nil, NewError(CodeInvalidRequest, "empty batch")), nil)
+		return s.marshalMessageError(s.handleError(ctx, nil, NewError(CodeInvalidRequest, "empty batch")), ID{})
 	}
 	responses := make([]*Response, 0, len(elems))
 	for _, elem := range elems {
 		var req Request
 		if err := s.decode(elem, &req); err != nil {
 			e := s.handleError(ctx, &req, classifyDecodeError(err))
-			responses = append(responses, NewErrorResponse(e, recoveredID(&req)))
+			responses = append(responses, NewErrorResponse(e, req.ID))
 			continue
 		}
 		if resp := s.Serve(ctx, &req); resp != nil {
@@ -275,26 +272,8 @@ func classifyDecodeError(err error) *Error {
 	return NewError(CodeInvalidRequest, err.Error())
 }
 
-// recoveredID returns an id the failed decode read, so the client can
-// correlate; the spec wants null only when none was detected.
-func recoveredID(req *Request) jsontext.Value {
-	if isValidID(req.ID) {
-		return req.ID
-	}
-	return nil
-}
-
-// isValidID: a JSON string, number, or null.
-func isValidID(id jsontext.Value) bool {
-	switch id.Kind() {
-	case '"', '0', 'n': // string, any number, null
-		return true
-	}
-	return false
-}
-
 // marshalMessageError writes the error for a message that never reached Serve.
-func (s *Server) marshalMessageError(e *Error, id jsontext.Value) (jsontext.Value, error) {
+func (s *Server) marshalMessageError(e *Error, id ID) (jsontext.Value, error) {
 	return marshalResponse(NewErrorResponse(e, id), s.options())
 }
 

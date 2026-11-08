@@ -6,7 +6,7 @@
 //
 //   - Server.Register installs a Handler — func(context.Context, P) (R, error)
 //     — under a method name. This is the normal way to write a method.
-//   - Server.RegisterRaw installs a RawHandler, working in raw bytes.
+//   - Server.RegisterRaw installs a RawHandler, working on undecoded Params.
 //   - Server.SetErrorHandler decides what every failure looks like on the wire.
 //   - Server.Serve dispatches one decoded Request. Server.ServeMessage parses
 //     raw bytes first, batches included, for transports like WebSocket or
@@ -102,14 +102,14 @@
 //
 // # Polymorphic fields
 //
-// Request.Params, Request.ID, Response.Result, and Error.Data are
-// jsontext.Value because the spec leaves their types open; Register and Raw
-// decode params and results for you.
+// Response.Result and Error.Data are jsontext.Value because the spec leaves
+// their types open; Register and Raw decode params and results for you.
 //
-// The two the spec does constrain are checked where they are built: NewParams
-// requires an object or an array, and NewID a string or a number. NewID
-// returns its error rather than an empty id, since an empty id is how
-// IsNotification decides — dropping it would turn a call into a notification.
+// The two the spec does constrain have their own types. Params holds an
+// object or array, or is zero when absent; NewParams enforces the shape. ID
+// holds a string, number, or null as its JSON encoding, so ids compare with ==
+// and work as map keys; StringID and IntID cannot fail. A zero ID is
+// how IsNotification decides.
 //
 // # Not included
 //

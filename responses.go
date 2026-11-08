@@ -15,7 +15,7 @@ type Response struct {
 	JSONRPC string         `json:"jsonrpc"`
 	Result  jsontext.Value `json:"result,omitzero"`
 	Error   *Error         `json:"error,omitzero"`
-	ID      jsontext.Value `json:"id"`
+	ID      ID             `json:"id"`
 }
 
 var (
@@ -23,21 +23,21 @@ var (
 	_ json.UnmarshalerFrom = (*Response)(nil)
 )
 
-// NewSuccessResponse builds a Response; an empty result or id becomes null.
-func NewSuccessResponse(result, id jsontext.Value) *Response {
+// NewSuccessResponse builds a Response; an empty result or zero id becomes null.
+func NewSuccessResponse(result jsontext.Value, id ID) *Response {
 	if len(result) == 0 {
 		result = jsontext.Value("null")
 	}
-	if len(id) == 0 {
-		id = jsontext.Value("null")
+	if id.IsZero() {
+		id = nullID()
 	}
 	return &Response{JSONRPC: Version, Result: result, ID: id}
 }
 
-// NewErrorResponse builds a Response; an empty id becomes null.
-func NewErrorResponse(err *Error, id jsontext.Value) *Response {
-	if len(id) == 0 {
-		id = jsontext.Value("null")
+// NewErrorResponse builds a Response; a zero id becomes null.
+func NewErrorResponse(err *Error, id ID) *Response {
+	if id.IsZero() {
+		id = nullID()
 	}
 	return &Response{JSONRPC: Version, Error: err, ID: id}
 }
@@ -90,10 +90,10 @@ func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 		return err
 	}
 	id := r.ID
-	if len(id) == 0 {
-		id = jsontext.Value("null")
+	if id.IsZero() {
+		id = nullID()
 	}
-	if err := enc.WriteValue(id); err != nil {
+	if err := enc.WriteValue(jsontext.Value(id.raw)); err != nil {
 		return err
 	}
 	return enc.WriteToken(jsontext.EndObject)
@@ -154,7 +154,11 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			if err != nil {
 				return decodeResponseError(err)
 			}
-			resp.ID = jsontext.Value(val.Clone())
+			id, err := idFromValue(val)
+			if err != nil {
+				return decodeResponseError(err)
+			}
+			resp.ID = id
 
 		default:
 			if err := d.SkipValue(); err != nil {
@@ -171,7 +175,7 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	if resp.JSONRPC != Version {
 		return fmt.Errorf("jsonrpc: response jsonrpc must be %q, got %q", Version, resp.JSONRPC)
 	}
-	if len(resp.ID) == 0 {
+	if resp.ID.IsZero() {
 		return errors.New("jsonrpc: response has no id")
 	}
 	switch {
