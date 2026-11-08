@@ -4,7 +4,63 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); while the major
 version is 0, minor releases may carry breaking changes.
 
-## [v0.5.0] — unreleased
+## [v0.6.0] — unreleased
+
+A breaking release. Request ids and params get their own types, `ID` and
+`Params`, in place of `jsontext.Value`.
+
+### Migrating from v0.5.0
+
+| v0.5.0 | v0.6.0 |
+| --- | --- |
+| `Request.ID`, `Response.ID` (`jsontext.Value`) | `ID` |
+| `Request.Params` (`jsontext.Value`) | `Params` |
+| `NewID("abc")`, `MustNewID("abc")` | `StringID("abc")` |
+| `NewID(n)`, `MustNewID(n)` | `IntID(n)` |
+| `NewParams(v) (jsontext.Value, error)` | `NewParams(v) (Params, error)` |
+| `RawHandler func(ctx, jsontext.Value) (jsontext.Value, error)` | `RawHandler func(ctx, Params) (jsontext.Value, error)` |
+| `string(req.ID)`, `string(req.Params)` | `req.ID.String()`, `req.Params.String()` |
+| `len(req.ID) == 0` | `req.ID.IsZero()` |
+| `nil` params or id in a constructor | `Params{}` / `ID{}` |
+
+`StringID` and `IntID` cannot fail, so the error handling around `NewID`
+goes away. In a `RawHandler` or `Middleware`, read the bytes with
+`params.String()`, decode with `params.DecodeInto`, and build replacement
+params with `NewParams`; the result stays `jsontext.Value`. A custom
+`*Request` unmarshaler builds the fields by decoding into them
+(`json.Unmarshal(raw, &req.ID)`) or with `NewParams(jsontext.Value(raw))`.
+
+### Changed
+
+- **`ID` replaces `jsontext.Value` ids; `NewID` and `MustNewID` are removed.**
+  `ID` holds its JSON encoding, so ids compare with `==` and work as map keys.
+  Decoded string ids are re-escaped minimally so differently escaped ids
+  match; numbers are kept verbatim. `String` returns the JSON form, so `"1"`
+  and `1` stay distinct.
+- **`Params` replaces `jsontext.Value` params**, in `Request` and in
+  `RawHandler`, so middleware sees params already checked to be an object or
+  array, or absent. A `jsontext.Value` passed to `NewParams` is now validated
+  rather than passed through unchecked.
+- **`Client.Call` checks the response id.** A response whose id differs from
+  the request's is an error rather than a result, so a misbehaving `Sender` or
+  server cannot hand one call another's reply. A null id is still accepted on
+  an error response, since that is how a server says it could not read the id.
+- **A request whose id is not a string, number, or null fails to decode** as
+  Invalid Request, rather than decoding and being rejected by `Serve`. The
+  response is the same: Invalid Request with a null id.
+- `Client.Call` and `Notify` no longer double-prefix a params error: it reads
+  `jsonrpc: params must be…` rather than `jsonrpc: marshal params: jsonrpc:
+  params must be…`.
+
+### Added
+
+- **`ID`** — `StringID`, `IntID`, `IsZero`, `IsNull`, `String`, and its own
+  `MarshalJSONTo` / `UnmarshalJSONFrom`.
+- **`Params`** — `IsObject`, `IsArray`, `IsZero`, `String`, `DecodeInto`,
+  `Map` and `Slice` (members left undecoded, so numbers are not rounded), and
+  its own `MarshalJSONTo` / `UnmarshalJSONFrom`.
+
+## [v0.5.0] — 2026-09-08
 
 A breaking release. The API is now typed-first, every failure routes through
 one `ErrorHandler`, and JSON policy on both sides of the wire is set with
@@ -25,26 +81,6 @@ use:
 
 `Server.Register` is unchanged in name and now takes a `Handler[P, R]`.
 
-Request ids and params have their own types:
-
-| v0.4.0 | v0.5.0 |
-| --- | --- |
-| `Request.ID`, `Response.ID` (`jsontext.Value`) | `ID` |
-| `Request.Params` (`jsontext.Value`) | `Params` |
-| `NewID("abc")` | `NewStringID("abc")` |
-| `NewID(n)` | `NewIntID(n)` |
-| `NewParams(v) (jsontext.Value, error)` | `NewParams(v) (Params, error)` |
-| `string(req.ID)`, `string(req.Params)` | `req.ID.String()`, `req.Params.String()` |
-| `len(req.ID) == 0` | `req.ID.IsZero()` |
-| `nil` params or id in a constructor | `Params{}` / `ID{}` |
-
-A custom `*Request` unmarshaler builds the fields by decoding into them
-(`json.Unmarshal(raw, &req.ID)`) or with `NewParams(jsontext.Value(raw))`.
-`RawHandler` (and so `Middleware`) receives `Params` rather than
-`jsontext.Value`: `func(ctx, Params) (jsontext.Value, error)`. Read the bytes
-with `params.String()`, decode with `params.DecodeInto`, and build replacement
-params with `NewParams`. The result stays `jsontext.Value`.
-
 Removed, with no replacement needed:
 
 - `RequestDecoder` and `Server.SetRequestDecoder` — install a `*Request`
@@ -59,24 +95,20 @@ Removed, with no replacement needed:
   than `Error`'s own methods traffics in `*Error` any more. Returning an `*Error`
   means "I classified this"; anything else, wrapped with `%w` or not, is left
   to the `ErrorHandler`.
-- **`ID` replaces `jsontext.Value` ids, and `NewID` is removed.** `NewID`
-  could fail and return an empty id — which is a *notification*, so a failed id
-  silently turned a call into fire-and-forget. `NewStringID` and `NewIntID`
-  cannot fail. `ID` holds its JSON encoding, so ids compare with `==`; decoded
-  string ids are re-escaped minimally so differently escaped ids match, and
-  numbers are kept verbatim.
-- **`Params` replaces `jsontext.Value` params.** `NewParams` rejects params that
-  are not an object or an array, as §4.2 requires — a scalar, a `null` (which
-  is what a typed nil marshals to), or an empty value is now an error at the
-  call site instead of an Invalid Request from the far end. A `jsontext.Value`
-  argument is now validated rather than passed through unchecked.
-- **`Client.Call` checks the response id.** A response whose id differs from
-  the request's is an error rather than a result, so a misbehaving `Sender` or
-  server cannot hand one call another's reply. A null id is still accepted on
-  an error response, since that is how a server says it could not read the id.
-- **A request whose id is not a string, number, or null fails to decode** as
-  Invalid Request, rather than decoding and being rejected by `Serve`. The
-  response is the same: Invalid Request with a null id.
+- **`NewID` returns `(jsontext.Value, error)`.** It previously discarded
+  `json.Marshal`'s error and returned an empty id — and an empty id is a
+  *notification*, so a failed id silently turned a call into fire-and-forget.
+  It now also rejects an encoding that is not a JSON string or number, which
+  a marshaler on a named type could otherwise produce. `MustNewID` is the
+  panicking form for literals and counters; its constraint omits `~`, so a
+  named type carrying a marshaler cannot reach it at all and the only
+  remaining panic is a string holding invalid UTF-8. Convert to reach it —
+  `MustNewID(string(id))` encodes the underlying string and bypasses any
+  marshaler — or use `NewID` to have the marshaler honored.
+- **`NewParams` rejects params that are not an object or an array**, as §4.2
+  requires — a scalar, a `null` (which is what a typed nil marshals to), or an
+  empty value is now an error at the call site instead of an Invalid Request
+  from the far end.
 - **The request decode is strict.** An unknown envelope member, a duplicate
   member name anywhere, a non-string `method` or `jsonrpc`, and non-structured
   `params` (including `"params":null`) are all Invalid Request. Unknown members
@@ -118,13 +150,12 @@ Removed, with no replacement needed:
   id to JSON null.
 - **`DecodeResponses`** — parse a batch reply, applying those checks element by
   element.
-- **`ID`** (`NewStringID`, `NewIntID`, `IsZero`, `IsNull`, `String`) and
-  **`Params`** (`NewParams`, `IsObject`, `IsArray`, `IsZero`, `String`,
-  `DecodeInto`, `Map`, `Slice`) — see above.
+- **`MustNewID`** — see above.
 
 ## [v0.4.0] — 2026-08-27
 
 Earlier releases predate this changelog; see the git history.
 
-[v0.5.0]: https://github.com/rykroon/jsonrpc/compare/v0.4.0...HEAD
+[v0.6.0]: https://github.com/rykroon/jsonrpc/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/rykroon/jsonrpc/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/rykroon/jsonrpc/releases/tag/v0.4.0
