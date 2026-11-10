@@ -48,15 +48,6 @@ func (e *Error) WithData(data any) (*Error, error) {
 	return &c, nil
 }
 
-// MustWithData is WithData for data known to be marshalable. It panics on failure.
-func (e *Error) MustWithData(data any) *Error {
-	c, err := e.WithData(data)
-	if err != nil {
-		panic(fmt.Sprintf("jsonrpc: marshal error data: %v", err))
-	}
-	return c
-}
-
 // UnmarshalData decodes the Data field into into. Empty Data is a no-op.
 func (e *Error) UnmarshalData(into any) error {
 	if len(e.Data) == 0 {

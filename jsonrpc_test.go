@@ -28,7 +28,7 @@ func newTestServer(t *testing.T) *Server {
 		return addResult{Sum: p.A + p.B}, nil
 	})
 	s.Register("fail", func(_ context.Context, _ struct{}) (any, error) {
-		return nil, NewError(-32001, "custom").MustWithData(map[string]int{"x": 1})
+		return nil, withData(NewError(-32001, "custom"), map[string]int{"x": 1})
 	})
 	s.Register("boom", func(_ context.Context, _ struct{}) (any, error) {
 		return nil, errors.New("internal boom")
@@ -223,13 +223,13 @@ func TestErrorWithData(t *testing.T) {
 	require.JSONEq(t, `{"x":1}`, string(e.Data))
 }
 
-func TestErrorMustWithData(t *testing.T) {
-	e := NewError(-32001, "custom").MustWithData([]int{1, 2})
-	require.JSONEq(t, `[1,2]`, string(e.Data))
-
-	require.Panics(t, func() {
-		NewError(-32001, "custom").MustWithData(make(chan int))
-	})
+// withData is WithData for test data known to be marshalable.
+func withData(e *Error, data any) *Error {
+	c, err := e.WithData(data)
+	if err != nil {
+		panic(err)
+	}
+	return c
 }
 
 func TestClientCallGeneratesUniqueIDs(t *testing.T) {
@@ -849,8 +849,8 @@ func TestRawWithHandlerValidation(t *testing.T) {
 	// only reports params that do not fit P.
 	add := Raw(func(_ context.Context, p addParams) (addResult, error) {
 		if p.A < 0 || p.B < 0 {
-			return addResult{}, NewError(CodeInvalidParams, "operands must be non-negative").
-				MustWithData(map[string]any{"a": p.A, "b": p.B})
+			return addResult{}, withData(NewError(CodeInvalidParams, "operands must be non-negative"),
+				map[string]any{"a": p.A, "b": p.B})
 		}
 		return addResult{Sum: p.A + p.B}, nil
 	})
@@ -1199,7 +1199,7 @@ func requestUnmarshaler(fn func(*jsontext.Decoder, *Request) error) json.Options
 }
 
 func TestRequestUnmarshalerErrorPassThrough(t *testing.T) {
-	custom := NewError(-32050, "bad envelope").MustWithData(map[string]string{"hint": "read the docs"})
+	custom := withData(NewError(-32050, "bad envelope"), map[string]string{"hint": "read the docs"})
 
 	t.Run("bespoke *Error surfaces verbatim", func(t *testing.T) {
 		s := NewServer()
@@ -1717,7 +1717,7 @@ func TestClientSetOptionsPanicsAfterUse(t *testing.T) {
 
 // TestErrorDataUsesJSONV2 pins the escaping: v1 would write \u003c here.
 func TestErrorDataUsesJSONV2(t *testing.T) {
-	e := NewError(CodeServerError, "x").MustWithData(map[string]string{"q": "<b>&</b>"})
+	e := withData(NewError(CodeServerError, "x"), map[string]string{"q": "<b>&</b>"})
 	require.Equal(t, `{"q":"<b>&</b>"}`, string(e.Data))
 
 	var out map[string]string
@@ -1888,8 +1888,8 @@ func TestMiddlewareCanWrapErrors(t *testing.T) {
 	s := NewServer()
 	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) *Error {
 		if errors.Is(err, errDBUnavailable) {
-			return NewError(CodeServerError, "service unavailable").
-				MustWithData(map[string]string{"detail": err.Error()})
+			return withData(NewError(CodeServerError, "service unavailable"),
+				map[string]string{"detail": err.Error()})
 		}
 		return DefaultErrorHandler(ctx, req, err)
 	})
