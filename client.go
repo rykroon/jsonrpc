@@ -13,27 +13,27 @@ import (
 // in Response.Error. For notifications the Response is ignored and should be
 // nil.
 type Sender interface {
-	Send(ctx context.Context, req *Request) (*Response, error)
+	Send(ctx context.Context, req Request) (*Response, error)
 }
 
 // SenderFunc adapts a plain function into a Sender, mirroring net/http's
 // Handler / HandlerFunc.
-type SenderFunc func(ctx context.Context, req *Request) (*Response, error)
+type SenderFunc func(ctx context.Context, req Request) (*Response, error)
 
-func (f SenderFunc) Send(ctx context.Context, req *Request) (*Response, error) {
+func (f SenderFunc) Send(ctx context.Context, req Request) (*Response, error) {
 	return f(ctx, req)
 }
 
 // Sender returns a Sender that dispatches directly to s, for a client and
 // server in the same process. Its error is always nil.
 func (s *Server) Sender() Sender {
-	return SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
+	return SenderFunc(func(ctx context.Context, req Request) (*Response, error) {
 		return s.Serve(ctx, req), nil
 	})
 }
 
 // Client wraps a Sender. Call and Notify marshal params, generate ids, and
-// decode results; Send is the escape hatch for pre-built *Request values.
+// decode results; Send is the escape hatch for pre-built Request values.
 type Client struct {
 	sender Sender
 	nextID atomic.Int64
@@ -121,6 +121,6 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 // Send round-trips req via the underlying Sender. Server-reported errors appear
 // in Response.Error, not in the error return; for a notification the Sender's
 // response is returned as-is (typically nil).
-func (c *Client) Send(ctx context.Context, req *Request) (*Response, error) {
+func (c *Client) Send(ctx context.Context, req Request) (*Response, error) {
 	return c.sender.Send(ctx, req)
 }

@@ -75,11 +75,11 @@
 // Internal error carrying its message. A server that must not leak internals
 // installs its own:
 //
-//	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) jsonrpc.Error {
+//	s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) jsonrpc.Error {
 //		if e, ok := errors.AsType[jsonrpc.Error](err); ok {
 //			return e // a classified failure is already client-safe
 //		}
-//		log.Printf("rpc %s: %v", req.Method, err)
+//		log.Printf("rpc %s: %v", req.Method(), err)
 //		return jsonrpc.NewError(jsonrpc.CodeInternalError, "internal error")
 //	})
 //

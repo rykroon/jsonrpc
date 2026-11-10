@@ -10,16 +10,71 @@ const Version = "2.0"
 
 // Request is a JSON-RPC 2.0 request, or a notification when ID is zero.
 type Request struct {
-	JSONRPC string `json:"jsonrpc"`
-	Method  string `json:"method"`
-	Params  Params `json:"params,omitzero"`
-	ID      ID     `json:"id,omitzero"`
+	jsonrpc string
+	method  string
+	params  Params
+	id      ID
 }
 
-var _ json.UnmarshalerFrom = (*Request)(nil)
+func (req *Request) Jsonrpc() string {
+	return req.jsonrpc
+}
+
+func (req *Request) Method() string {
+	return req.method
+}
+
+func (req *Request) Params() Params {
+	return req.params
+}
+
+func (req *Request) ID() ID {
+	return req.id
+}
+
+var (
+	_ json.MarshalerTo     = (*Request)(nil)
+	_ json.UnmarshalerFrom = (*Request)(nil)
+)
+
+// MarshalJSONTo writes the request, omitting zero params and id.
+func (req *Request) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
+		return err
+	}
+	if err := enc.WriteToken(jsontext.String("jsonrpc")); err != nil {
+		return err
+	}
+	if err := enc.WriteToken(jsontext.String(req.jsonrpc)); err != nil {
+		return err
+	}
+	if err := enc.WriteToken(jsontext.String("method")); err != nil {
+		return err
+	}
+	if err := enc.WriteToken(jsontext.String(req.method)); err != nil {
+		return err
+	}
+	if !req.params.IsZero() {
+		if err := enc.WriteToken(jsontext.String("params")); err != nil {
+			return err
+		}
+		if err := req.params.MarshalJSONTo(enc); err != nil {
+			return err
+		}
+	}
+	if !req.id.IsZero() {
+		if err := enc.WriteToken(jsontext.String("id")); err != nil {
+			return err
+		}
+		if err := req.id.MarshalJSONTo(enc); err != nil {
+			return err
+		}
+	}
+	return enc.WriteToken(jsontext.EndObject)
+}
 
 func (r *Request) IsNotification() bool {
-	return r.ID.IsZero()
+	return r.id.IsZero()
 }
 
 // UnmarshalJSONFrom decodes one request object token by token, so every
@@ -58,7 +113,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 				return NewError(CodeInvalidRequest, "jsonrpc must be a string")
 			}
 			// Serve judges the version; failing here would discard the id.
-			req.JSONRPC = tok.String()
+			req.jsonrpc = tok.String()
 
 		case "method":
 			tok, err := d.ReadToken()
@@ -68,7 +123,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			if tok.Kind() != jsontext.KindString {
 				return NewError(CodeInvalidRequest, "method must be a string")
 			}
-			req.Method = tok.String()
+			req.method = tok.String()
 
 		case "params":
 			val, err := d.ReadValue()
@@ -80,7 +135,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 				// null is present but unstructured; omit params to send none.
 				return NewError(CodeInvalidRequest, "params must be an object or array")
 			}
-			req.Params = p
+			req.params = p
 
 		case "id":
 			val, err := d.ReadValue()
@@ -91,7 +146,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			if err != nil {
 				return NewError(CodeInvalidRequest, "id must be a string, number, or null")
 			}
-			req.ID = id
+			req.id = id
 
 		default:
 			return NewError(CodeInvalidRequest, "unknown member: "+name)
@@ -114,11 +169,11 @@ func tokenError(err error) Error {
 }
 
 // NewRequest assembles a Request; see NewParams, StringID, and IntID.
-func NewRequest(method string, params Params, id ID) *Request {
-	return &Request{JSONRPC: Version, Method: method, Params: params, ID: id}
+func NewRequest(method string, params Params, id ID) Request {
+	return Request{jsonrpc: Version, method: method, params: params, id: id}
 }
 
 // NewNotification assembles a Request without an id.
-func NewNotification(method string, params Params) *Request {
-	return &Request{JSONRPC: Version, Method: method, Params: params}
+func NewNotification(method string, params Params) Request {
+	return Request{jsonrpc: Version, method: method, params: params}
 }

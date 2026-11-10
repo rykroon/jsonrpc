@@ -239,8 +239,8 @@ func withData(e Error, data any) Error {
 func TestClientCallGeneratesUniqueIDs(t *testing.T) {
 	s := newTestServer(t)
 	var ids []string
-	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
-		ids = append(ids, req.ID.String())
+	c := NewClient(SenderFunc(func(ctx context.Context, req Request) (*Response, error) {
+		ids = append(ids, req.ID().String())
 		return s.Serve(ctx, req), nil
 	}))
 
@@ -264,10 +264,10 @@ func TestClientNotify(t *testing.T) {
 
 func TestInvalidJSONRPCVersion(t *testing.T) {
 	s := NewServer()
-	resp := s.Serve(context.Background(), &Request{
-		JSONRPC: "1.0",
-		Method:  "anything",
-		ID:      IntID(1),
+	resp := s.Serve(context.Background(), Request{
+		jsonrpc: "1.0",
+		method:  "anything",
+		id:      IntID(1),
 	})
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
@@ -282,7 +282,7 @@ func TestRequestRoundTripPreservesStringID(t *testing.T) {
 
 	var out Request
 	require.NoError(t, json.Unmarshal(b, &out))
-	require.Equal(t, `"abc"`, out.ID.String())
+	require.Equal(t, `"abc"`, out.ID().String())
 	require.False(t, out.IsNotification())
 }
 
@@ -478,7 +478,7 @@ func TestDecodeResponsesRejectsBadElement(t *testing.T) {
 // Call must not decode another request's response as its own.
 func TestClientCallChecksResponseID(t *testing.T) {
 	respond := func(resp *Response) *Client {
-		return NewClient(SenderFunc(func(context.Context, *Request) (*Response, error) {
+		return NewClient(SenderFunc(func(context.Context, Request) (*Response, error) {
 			return resp, nil
 		}))
 	}
@@ -517,8 +517,8 @@ func TestClientCallChecksResponseID(t *testing.T) {
 // A Sender may build a Response itself, so Call must not read a response with
 // neither member as a success with nothing to decode.
 func TestClientCallResponseWithNeitherMember(t *testing.T) {
-	c := NewClient(SenderFunc(func(_ context.Context, req *Request) (*Response, error) {
-		return &Response{JSONRPC: Version, ID: req.ID}, nil
+	c := NewClient(SenderFunc(func(_ context.Context, req Request) (*Response, error) {
+		return &Response{JSONRPC: Version, ID: req.ID()}, nil
 	}))
 
 	var got addResult
@@ -756,8 +756,8 @@ func TestServerAcceptsValidIDs(t *testing.T) {
 func TestSendPropagatesCallerID(t *testing.T) {
 	s := newTestServer(t)
 	var seen ID
-	c := NewClient(SenderFunc(func(ctx context.Context, req *Request) (*Response, error) {
-		seen = req.ID
+	c := NewClient(SenderFunc(func(ctx context.Context, req Request) (*Response, error) {
+		seen = req.ID()
 		return s.Serve(ctx, req), nil
 	}))
 
@@ -836,7 +836,7 @@ func TestNewParamsRequiresStructured(t *testing.T) {
 
 	t.Run("Call and Notify report it before sending", func(t *testing.T) {
 		var sent int
-		c := NewClient(SenderFunc(func(context.Context, *Request) (*Response, error) {
+		c := NewClient(SenderFunc(func(context.Context, Request) (*Response, error) {
 			sent++
 			return nil, nil
 		}))
@@ -1013,12 +1013,12 @@ func TestDuplicateMemberNamesRejected(t *testing.T) {
 	t.Run("duplicate params via Serve go through the typed decode", func(t *testing.T) {
 		// A transport calling Serve directly may not have tokenized params;
 		// the typed pipeline still rejects duplicates, as Invalid params.
-		resp := s.Serve(context.Background(), &Request{
-			JSONRPC: Version,
-			Method:  "add",
+		resp := s.Serve(context.Background(), Request{
+			jsonrpc: Version,
+			method:  "add",
 			// NewParams would reject the duplicate, so build it directly.
-			Params: Params{value: jsontext.Value(`{"a":1,"a":2}`)},
-			ID:     IntID(1),
+			params: Params{value: jsontext.Value(`{"a":1,"a":2}`)},
+			id:     IntID(1),
 		})
 		require.NotNil(t, resp.Error)
 		require.Equal(t, CodeInvalidParams, resp.Error.Code)
@@ -1260,7 +1260,7 @@ func TestRequestUnmarshalerCannotBypassServer(t *testing.T) {
 			if err := d.SkipValue(); err != nil {
 				return err
 			}
-			req.JSONRPC, req.Method, req.ID = "1.0", "add", IntID(1)
+			req.jsonrpc, req.method, req.id = "1.0", "add", IntID(1)
 			return nil
 		}))
 		out, err := s.ServeMessage(context.Background(), []byte(`{}`))
@@ -1318,9 +1318,9 @@ func TestRequestDecodesItself(t *testing.T) {
 		var req Request
 		require.NoError(t, json.Unmarshal(
 			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1},"id":1}`), &req))
-		require.Equal(t, "add", req.Method)
-		require.JSONEq(t, `{"a":1}`, req.Params.String())
-		require.JSONEq(t, "1", req.ID.String())
+		require.Equal(t, "add", req.Method())
+		require.JSONEq(t, `{"a":1}`, req.Params().String())
+		require.JSONEq(t, "1", req.ID().String())
 	})
 
 	// v1 is implemented over v2 in Go 1.27, so it honors the method too.
@@ -1340,8 +1340,8 @@ func TestRequestUnmarshalJSONFromReplacesPriorMembers(t *testing.T) {
 	require.False(t, req.IsNotification())
 
 	require.NoError(t, json.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"ping"}`), &req))
-	require.Empty(t, req.ID, "the first message's id does not survive")
-	require.Empty(t, req.Params, "nor its params")
+	require.Empty(t, req.ID(), "the first message's id does not survive")
+	require.Empty(t, req.Params(), "nor its params")
 	require.True(t, req.IsNotification())
 }
 
@@ -1350,8 +1350,8 @@ func TestRequestUnmarshalJSONFromKeepsMembersReadBeforeAFailure(t *testing.T) {
 	var req Request
 	err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1,"method":"add","surprise":true}`), &req)
 	require.ErrorContains(t, err, "unknown member: surprise")
-	require.JSONEq(t, "1", req.ID.String())
-	require.Equal(t, "add", req.Method)
+	require.JSONEq(t, "1", req.ID().String())
+	require.Equal(t, "add", req.Method())
 }
 
 // An unmarshaler or marshaler in the options outranks a method, so SetOptions
@@ -1369,8 +1369,8 @@ func TestSetOptionsOverridesTheTypesOwnForm(t *testing.T) {
 				if err := json.UnmarshalDecode(d, &raw); err != nil {
 					return err
 				}
-				req.JSONRPC, req.Method = Version, "add"
-				req.Params, req.ID = raw.Params, raw.ID
+				req.jsonrpc, req.method = Version, "add"
+				req.params, req.id = raw.Params, raw.ID
 				return nil
 			},
 		)))
@@ -1713,7 +1713,7 @@ var errDBUnavailable = errors.New("db unavailable")
 func TestSetErrorHandlerSanitizesUnclassifiedErrors(t *testing.T) {
 	var logged error
 	s := NewServer()
-	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) Error {
+	s.SetErrorHandler(func(ctx context.Context, req Request, err error) Error {
 		if e, ok := errors.AsType[Error](err); ok {
 			return e
 		}
@@ -1734,10 +1734,8 @@ func TestSetErrorHandlerSanitizesUnclassifiedErrors(t *testing.T) {
 
 func TestErrorHandlerCannotChangeResponseID(t *testing.T) {
 	s := NewServer()
-	s.SetErrorHandler(func(_ context.Context, req *Request, err error) Error {
-		if req != nil {
-			req.ID = StringID("hijacked")
-		}
+	s.SetErrorHandler(func(_ context.Context, req Request, err error) Error {
+		req.id = StringID("hijacked")
 		return DefaultErrorHandler(context.Background(), req, err)
 	})
 	s.Register("boom", func(context.Context, struct{}) (any, error) {
@@ -1774,7 +1772,7 @@ func TestErrorHandlerSeesClassifiedErrors(t *testing.T) {
 	// An Error a component raised still reaches the handler, so a verbose
 	// json/v2 message can be replaced.
 	s := NewServer()
-	s.SetErrorHandler(func(_ context.Context, _ *Request, err error) Error {
+	s.SetErrorHandler(func(_ context.Context, _ Request, err error) Error {
 		e, ok := errors.AsType[Error](err)
 		require.True(t, ok, "expected the component's Error, got %T", err)
 		return NewError(e.Code, "invalid params")
@@ -1792,8 +1790,8 @@ func TestErrorHandlerReceivesRequest(t *testing.T) {
 	var gotMethod string
 	var gotID ID
 	s := NewServer()
-	s.SetErrorHandler(func(_ context.Context, req *Request, err error) Error {
-		gotMethod, gotID = req.Method, req.ID
+	s.SetErrorHandler(func(_ context.Context, req Request, err error) Error {
+		gotMethod, gotID = req.Method(), req.ID()
 		return DefaultErrorHandler(context.Background(), req, err)
 	})
 	s.Register("boom", func(context.Context, struct{}) (any, error) {
@@ -1809,7 +1807,7 @@ func TestErrorHandlerObservesNotificationFailure(t *testing.T) {
 	var seen error
 	var wasNotification bool
 	s := NewServer()
-	s.SetErrorHandler(func(_ context.Context, req *Request, err error) Error {
+	s.SetErrorHandler(func(_ context.Context, req Request, err error) Error {
 		seen, wasNotification = err, req.IsNotification()
 		return NewError(CodeInternalError, "unused")
 	})
@@ -1825,9 +1823,9 @@ func TestErrorHandlerObservesNotificationFailure(t *testing.T) {
 
 func TestErrorHandlerCoversDecodePath(t *testing.T) {
 	t.Run("envelope decode", func(t *testing.T) {
-		var got *Request
+		var got Request
 		s := NewServer()
-		s.SetErrorHandler(func(_ context.Context, req *Request, err error) Error {
+		s.SetErrorHandler(func(_ context.Context, req Request, err error) Error {
 			got = req
 			return NewError(CodeServerError, "rejected")
 		})
@@ -1840,17 +1838,16 @@ func TestErrorHandlerCoversDecodePath(t *testing.T) {
 		code, msg, _ := decodeError(t, s, `{"jsonrpc":"2.0","id":1,"method":"add","surprise":true}`)
 		require.Equal(t, CodeServerError, code)
 		require.Equal(t, "rejected", msg)
-		require.NotNil(t, got)
-		require.Equal(t, "add", got.Method)
-		require.JSONEq(t, "1", got.ID.String())
+		require.Equal(t, "add", got.Method())
+		require.JSONEq(t, "1", got.ID().String())
 	})
 
-	t.Run("batch-level failure passes a nil request", func(t *testing.T) {
+	t.Run("batch-level failure passes a zero request", func(t *testing.T) {
 		var called bool
 		s := NewServer()
-		s.SetErrorHandler(func(_ context.Context, req *Request, err error) Error {
+		s.SetErrorHandler(func(_ context.Context, req Request, err error) Error {
 			called = true
-			require.Nil(t, req, "no request could be decoded")
+			require.Zero(t, req, "no request could be decoded")
 			return NewError(CodeServerError, "rejected")
 		})
 		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
@@ -1867,7 +1864,7 @@ func TestMiddlewareCanWrapErrors(t *testing.T) {
 	// Wrapping is what a plain error return buys: the middleware adds context
 	// with %w and the ErrorHandler still recognizes the sentinel underneath.
 	s := NewServer()
-	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) Error {
+	s.SetErrorHandler(func(ctx context.Context, req Request, err error) Error {
 		if errors.Is(err, errDBUnavailable) {
 			return withData(NewError(CodeServerError, "service unavailable"),
 				map[string]string{"detail": err.Error()})
@@ -1907,7 +1904,7 @@ func TestSetErrorHandlerPanics(t *testing.T) {
 	t.Run("after a method is registered", func(t *testing.T) {
 		s := newTestServer(t)
 		require.Panics(t, func() {
-			s.SetErrorHandler(func(context.Context, *Request, error) Error { return Error{} })
+			s.SetErrorHandler(func(context.Context, Request, error) Error { return Error{} })
 		})
 	})
 }

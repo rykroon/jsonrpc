@@ -28,6 +28,9 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `ErrorHandler func(...) *Error` | `ErrorHandler func(...) Error` |
 | `errors.AsType[*jsonrpc.Error](err)` | `errors.AsType[jsonrpc.Error](err)` |
 | `Response{Error: &Error{...}}` | unchanged; `Response.Error` stays a pointer |
+| `*Request` in `Serve`, `Sender`, `SenderFunc`, `ErrorHandler`, `Client.Send` | `Request` |
+| `req.Method`, `req.Params`, `req.ID`, `req.JSONRPC` | `req.Method()`, `req.Params()`, `req.ID()`, `req.Jsonrpc()` |
+| `&Request{...}` | `NewRequest(...)` / `NewNotification(...)` |
 
 `StringID` and `IntID` cannot fail, so the error handling around `NewID`
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
@@ -38,6 +41,10 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 
 ### Changed
 
+- **`Request` is a value type with unexported fields.** It is passed by value
+  everywhere and read through accessors, so it is never nil and an
+  `ErrorHandler` cannot alter it. Build one with `NewRequest` or
+  `NewNotification`; an `ErrorHandler` given no request sees the zero value.
 - **`Error` is a value type.** `NewError`, `WithData`, `ErrorHandler`, and
   `DefaultErrorHandler` use `Error` instead of `*Error`, and `Client.Call`
   returns server errors as `Error`. A handler can no longer return a typed-nil
@@ -119,6 +126,10 @@ Removed, with no replacement needed:
 
 ### Changed
 
+- **`Request` is a value type with unexported fields.** It is passed by value
+  everywhere and read through accessors, so it is never nil and an
+  `ErrorHandler` cannot alter it. Build one with `NewRequest` or
+  `NewNotification`; an `ErrorHandler` given no request sees the zero value.
 - **`RawHandler` returns `error`, not `*Error`.** No public signature other
   than `Error`'s own methods traffics in `*Error` any more. Returning an `*Error`
   means "I classified this"; anything else, wrapped with `%w` or not, is left

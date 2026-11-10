@@ -31,12 +31,12 @@ type Middleware func(next RawHandler) RawHandler
 // and may be partial after a failed decode. For a notification the result is
 // discarded, but the handler still runs so the failure can be logged.
 // Changes to req do not reach the response.
-type ErrorHandler func(ctx context.Context, req *Request, err error) Error
+type ErrorHandler func(ctx context.Context, req Request, err error) Error
 
 // DefaultErrorHandler sends an Error verbatim and reports anything else as an
 // Internal error carrying its message. Servers that must not leak internals
 // install their own.
-func DefaultErrorHandler(_ context.Context, _ *Request, err error) Error {
+func DefaultErrorHandler(_ context.Context, _ Request, err error) Error {
 	if e, ok := errors.AsType[Error](err); ok {
 		return e
 	}
@@ -110,7 +110,7 @@ func (s *Server) SetErrorHandler(h ErrorHandler) {
 }
 
 // handleError runs the ErrorHandler.
-func (s *Server) handleError(ctx context.Context, req *Request, err error) Error {
+func (s *Server) handleError(ctx context.Context, req Request, err error) Error {
 	s.mu.RLock()
 	h := s.errorHandler
 	s.mu.RUnlock()
@@ -147,28 +147,28 @@ func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middlew
 
 // Serve dispatches one request. A notification runs but returns nil. Handler
 // panics are not recovered.
-func (s *Server) Serve(ctx context.Context, req *Request) *Response {
+func (s *Server) Serve(ctx context.Context, req Request) *Response {
 	// Read once, so an ErrorHandler that modifies req cannot change the reply's id.
-	id := req.ID
-	if req.JSONRPC != Version {
+	id := req.id
+	if req.jsonrpc != Version {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`)), id)
 	}
-	if req.Method == "" {
+	if req.method == "" {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, "missing method")), id)
 	}
 
 	s.mu.RLock()
-	h, ok := s.methods[req.Method]
+	h, ok := s.methods[req.method]
 	s.mu.RUnlock()
 	if !ok {
 		// The spec forbids replying to a notification, even an unknown method.
 		if req.IsNotification() {
 			return nil
 		}
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method)), id)
+		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.method)), id)
 	}
 
-	result, err := h(ctx, req.Params)
+	result, err := h(ctx, req.params)
 	if req.IsNotification() {
 		// No reply, but the ErrorHandler still runs so it can log.
 		if err != nil {
@@ -194,12 +194,12 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	}
 	var req Request
 	if err := s.decode(data, &req); err != nil {
-		id := req.ID
-		e := s.handleError(ctx, &req, classifyDecodeError(err))
+		id := req.id
+		e := s.handleError(ctx, req, classifyDecodeError(err))
 		// An id read before the failure lets the client correlate.
 		return s.marshalMessageError(e, id)
 	}
-	resp := s.Serve(ctx, &req)
+	resp := s.Serve(ctx, req)
 	if resp == nil {
 		return nil, nil
 	}
@@ -213,21 +213,21 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	opts := s.options()
 	var elems []jsontext.Value
 	if err := json.Unmarshal(data, &elems, json.JoinOptions(opts, jsontext.AllowDuplicateNames(true))); err != nil {
-		return s.marshalMessageError(s.handleError(ctx, nil, NewError(CodeParseError, err.Error())), ID{})
+		return s.marshalMessageError(s.handleError(ctx, Request{}, NewError(CodeParseError, err.Error())), ID{})
 	}
 	if len(elems) == 0 {
-		return s.marshalMessageError(s.handleError(ctx, nil, NewError(CodeInvalidRequest, "empty batch")), ID{})
+		return s.marshalMessageError(s.handleError(ctx, Request{}, NewError(CodeInvalidRequest, "empty batch")), ID{})
 	}
 	responses := make([]*Response, 0, len(elems))
 	for _, elem := range elems {
 		var req Request
 		if err := s.decode(elem, &req); err != nil {
-			id := req.ID
-			e := s.handleError(ctx, &req, classifyDecodeError(err))
+			id := req.id
+			e := s.handleError(ctx, req, classifyDecodeError(err))
 			responses = append(responses, NewErrorResponse(e, id))
 			continue
 		}
-		if resp := s.Serve(ctx, &req); resp != nil {
+		if resp := s.Serve(ctx, req); resp != nil {
 			responses = append(responses, resp)
 		}
 	}

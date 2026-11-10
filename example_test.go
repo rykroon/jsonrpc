@@ -194,11 +194,11 @@ func ExampleClient_SetOptions() {
 // safe to send; anything else becomes a fixed message.
 func ExampleServer_SetErrorHandler() {
 	s := jsonrpc.NewServer()
-	s.SetErrorHandler(func(_ context.Context, req *jsonrpc.Request, err error) jsonrpc.Error {
+	s.SetErrorHandler(func(_ context.Context, req jsonrpc.Request, err error) jsonrpc.Error {
 		if e, ok := errors.AsType[jsonrpc.Error](err); ok {
 			return e
 		}
-		fmt.Printf("log: rpc %s failed: %v\n", req.Method, err)
+		fmt.Printf("log: rpc %s failed: %v\n", req.Method(), err)
 		return jsonrpc.NewError(jsonrpc.CodeInternalError, "internal error")
 	})
 	s.Register("lookup", func(_ context.Context, _ struct{}) (string, error) {
