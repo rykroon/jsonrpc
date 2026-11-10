@@ -22,6 +22,8 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `string(req.ID)`, `string(req.Params)` | `req.ID.String()`, `req.Params.String()` |
 | `len(req.ID) == 0` | `req.ID.IsZero()` |
 | `nil` params or id in a constructor | `Params{}` / `ID{}` |
+| `e.SetData(v)` | `e, err = e.WithData(v)` |
+| `e.MustSetData(v)` | `e.MustWithData(v)` |
 
 `StringID` and `IntID` cannot fail, so the error handling around `NewID`
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
@@ -32,6 +34,10 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 
 ### Changed
 
+- **`Error.WithData` and `MustWithData` replace `SetData` and `MustSetData`.**
+  They return a copy instead of mutating the receiver, so a shared error such
+  as `var ErrNotFound = jsonrpc.NewError(...)` can't be changed by one request
+  and leak into another. `MustWithData` chains as `MustSetData` did.
 - **`ID` replaces `jsontext.Value` ids; `NewID` and `MustNewID` are removed.**
   `ID` holds its JSON encoding, so ids compare with `==` and work as map keys.
   Decoded string ids are re-escaped minimally so differently escaped ids

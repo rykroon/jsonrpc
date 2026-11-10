@@ -36,23 +36,25 @@ func NewError(code int, message string) *Error {
 	return &Error{Code: code, Message: message}
 }
 
-// SetData marshals data into the Data field, leaving it unchanged on failure.
-func (e *Error) SetData(data any) error {
+// WithData returns a copy of e with data marshaled into Data; e is unchanged,
+// so shared errors stay safe to reuse.
+func (e *Error) WithData(data any) (*Error, error) {
 	b, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	e.Data = b
-	return nil
+	c := *e
+	c.Data = b
+	return &c, nil
 }
 
-// MustSetData is SetData for data known to be marshalable. It panics on failure
-// and returns e for chaining.
-func (e *Error) MustSetData(data any) *Error {
-	if err := e.SetData(data); err != nil {
+// MustWithData is WithData for data known to be marshalable. It panics on failure.
+func (e *Error) MustWithData(data any) *Error {
+	c, err := e.WithData(data)
+	if err != nil {
 		panic(fmt.Sprintf("jsonrpc: marshal error data: %v", err))
 	}
-	return e
+	return c
 }
 
 // UnmarshalData decodes the Data field into into. Empty Data is a no-op.
