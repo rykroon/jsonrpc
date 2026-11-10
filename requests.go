@@ -32,6 +32,20 @@ func (req Request) ID() ID {
 	return req.id
 }
 
+func (r Request) IsNotification() bool {
+	return r.id.IsZero()
+}
+
+// NewRequest assembles a Request; see NewParams, StringID, and IntID.
+func NewRequest(method string, params Params, id ID) Request {
+	return Request{jsonrpc: Version, method: method, params: params, id: id}
+}
+
+// NewNotification assembles a Request without an id.
+func NewNotification(method string, params Params) Request {
+	return Request{jsonrpc: Version, method: method, params: params}
+}
+
 var (
 	_ json.MarshalerTo     = Request{}
 	_ json.UnmarshalerFrom = (*Request)(nil)
@@ -71,10 +85,6 @@ func (req Request) MarshalJSONTo(enc *jsontext.Encoder) error {
 		}
 	}
 	return enc.WriteToken(jsontext.EndObject)
-}
-
-func (r Request) IsNotification() bool {
-	return r.id.IsZero()
 }
 
 // UnmarshalJSONFrom decodes one request object token by token, so every
@@ -166,14 +176,4 @@ func tokenError(err error) Error {
 		return NewError(CodeInvalidRequest, err.Error())
 	}
 	return NewError(CodeParseError, err.Error())
-}
-
-// NewRequest assembles a Request; see NewParams, StringID, and IntID.
-func NewRequest(method string, params Params, id ID) Request {
-	return Request{jsonrpc: Version, method: method, params: params, id: id}
-}
-
-// NewNotification assembles a Request without an id.
-func NewNotification(method string, params Params) Request {
-	return Request{jsonrpc: Version, method: method, params: params}
 }
