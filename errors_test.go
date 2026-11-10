@@ -97,3 +97,10 @@ func TestErrorUnmarshalRejectsMalformed(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{"code":1,"message":"x","extra":true}`), &e))
 	require.Equal(t, NewError(1, "x"), e, "undefined members are skipped")
 }
+
+// Data hands out a copy, so a caller cannot alter the bytes an Error holds.
+func TestErrorDataDoesNotAlias(t *testing.T) {
+	e := withData(NewError(CodeServerError, "x"), []int{1})
+	e.Data()[0] = 'x'
+	require.Equal(t, `[1]`, string(e.Data()))
+}

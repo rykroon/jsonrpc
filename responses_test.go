@@ -192,3 +192,10 @@ func TestResponseUnmarshalZeroError(t *testing.T) {
 	err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","result":1,"error":{"code":0,"message":""},"id":1}`), &resp)
 	require.ErrorContains(t, err, "both result and error")
 }
+
+// Result hands out a copy, so a caller cannot alter the bytes a Response holds.
+func TestResponseResultDoesNotAlias(t *testing.T) {
+	resp := NewSuccessResponse(jsontext.Value(`[1]`), IntID(1))
+	resp.Result()[0] = 'x'
+	require.Equal(t, `[1]`, string(resp.Result()))
+}
