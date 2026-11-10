@@ -16,29 +16,29 @@ type Request struct {
 	id      ID
 }
 
-func (req *Request) JSONRPC() string {
+func (req Request) JSONRPC() string {
 	return req.jsonrpc
 }
 
-func (req *Request) Method() string {
+func (req Request) Method() string {
 	return req.method
 }
 
-func (req *Request) Params() Params {
+func (req Request) Params() Params {
 	return req.params
 }
 
-func (req *Request) ID() ID {
+func (req Request) ID() ID {
 	return req.id
 }
 
 var (
-	_ json.MarshalerTo     = (*Request)(nil)
+	_ json.MarshalerTo     = Request{}
 	_ json.UnmarshalerFrom = (*Request)(nil)
 )
 
 // MarshalJSONTo writes the request, omitting zero params and id.
-func (req *Request) MarshalJSONTo(enc *jsontext.Encoder) error {
+func (req Request) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (req *Request) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return enc.WriteToken(jsontext.EndObject)
 }
 
-func (r *Request) IsNotification() bool {
+func (r Request) IsNotification() bool {
 	return r.id.IsZero()
 }
 

@@ -20,23 +20,23 @@ type Response struct {
 	id      ID
 }
 
-func (r *Response) JSONRPC() string { return r.jsonrpc }
+func (r Response) JSONRPC() string { return r.jsonrpc }
 
 // Result is the raw result, nil on an error response.
-func (r *Response) Result() jsontext.Value { return r.result }
+func (r Response) Result() jsontext.Value { return r.result }
 
 // Error returns the error and true on an error response.
-func (r *Response) Error() (Error, bool) {
+func (r Response) Error() (Error, bool) {
 	if r.error == nil {
 		return Error{}, false
 	}
 	return *r.error, true
 }
 
-func (r *Response) ID() ID { return r.id }
+func (r Response) ID() ID { return r.id }
 
 // IsZero reports whether r is the zero Response, meaning no response.
-func (r *Response) IsZero() bool { return r.id.IsZero() }
+func (r Response) IsZero() bool { return r.id.IsZero() }
 
 var (
 	_ json.MarshalerTo     = Response{}
