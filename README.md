@@ -157,10 +157,11 @@ as an Internal error carrying the error's message.
 - `Request` — a plain struct of `Params` and `ID`. It
   decodes itself with `UnmarshalJSONFrom`, so the strict envelope check applies
   to any `json.Unmarshal` into one, not only the ones a `Server` drives.
-- `Response` — one struct for both shapes the spec allows: exactly one of
-  `Result` and `Error` is set, and `ID` is always present. `resp.Error != nil`
-  tells the two apart, and `Decode` unmarshals a successful result into a
-  target. `NewSuccessResponse` / `NewErrorResponse` normalize an empty result
+- `Response` — an immutable value for both shapes the spec allows: exactly
+  one of `Result()` and `Error()` is set, and `ID()` is always present.
+  `e, ok := resp.Error()` tells the two apart, and `Decode` unmarshals a
+  successful result into a target. The zero `Response` means no response
+  (`Serve` and `Sender` return it for a notification); check `IsZero()`. `NewSuccessResponse` / `NewErrorResponse` normalize an empty result
   or id to JSON null, and it writes itself in canonical form with
   `MarshalJSONTo` and reads itself with `UnmarshalJSONFrom`, so any
   `json.Unmarshal` into one checks the spec's invariants — what a `Sender`

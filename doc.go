@@ -95,10 +95,12 @@
 //
 // # Responses
 //
-// Response is one struct for both shapes: exactly one of Result and Error is
-// set, and ID is always present. NewSuccessResponse and NewErrorResponse
-// normalize an empty result or id to JSON null. Marshal and unmarshal both
-// refuse a response holding both members or neither.
+// Response is an immutable value for both shapes: exactly one of Result and
+// Error is set, and ID is always present. NewSuccessResponse and
+// NewErrorResponse normalize an empty result or id to JSON null. Marshal and
+// unmarshal both refuse a response holding both members or neither. The zero
+// Response means no response: Serve returns it for a notification, and
+// IsZero detects it.
 //
 // # Polymorphic fields
 //

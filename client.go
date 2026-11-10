@@ -11,23 +11,23 @@ import (
 // Sender round-trips a Request to a Response across a transport. The error
 // return is for transport failures only; errors reported by the server appear
 // in Response.Error. For notifications the Response is ignored and should be
-// nil.
+// zero.
 type Sender interface {
-	Send(ctx context.Context, req Request) (*Response, error)
+	Send(ctx context.Context, req Request) (Response, error)
 }
 
 // SenderFunc adapts a plain function into a Sender, mirroring net/http's
 // Handler / HandlerFunc.
-type SenderFunc func(ctx context.Context, req Request) (*Response, error)
+type SenderFunc func(ctx context.Context, req Request) (Response, error)
 
-func (f SenderFunc) Send(ctx context.Context, req Request) (*Response, error) {
+func (f SenderFunc) Send(ctx context.Context, req Request) (Response, error) {
 	return f(ctx, req)
 }
 
 // Sender returns a Sender that dispatches directly to s, for a client and
 // server in the same process. Its error is always nil.
 func (s *Server) Sender() Sender {
-	return SenderFunc(func(ctx context.Context, req Request) (*Response, error) {
+	return SenderFunc(func(ctx context.Context, req Request) (Response, error) {
 		return s.Serve(ctx, req), nil
 	})
 }
@@ -87,21 +87,21 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 	if err != nil {
 		return err
 	}
-	if resp == nil {
+	if resp.IsZero() {
 		return fmt.Errorf("jsonrpc: transport returned no response for call %q", method)
 	}
 	// Another call's result must not decode as this one's. A null id is
 	// allowed on an error: the server could not read ours.
-	if resp.ID != id && !(resp.ID.IsNull() && resp.Error != nil) {
-		return fmt.Errorf("jsonrpc: response id %s does not match request id %s for call %q", resp.ID, id, method)
+	rpcErr, isErr := resp.Error()
+	if resp.ID() != id && !(resp.ID().IsNull() && isErr) {
+		return fmt.Errorf("jsonrpc: response id %s does not match request id %s for call %q", resp.ID(), id, method)
 	}
-	if resp.Error != nil {
-		return *resp.Error
+	if isErr {
+		return rpcErr
 	}
-	// A Sender is free to build a Response itself, so guard the shape the spec
-	// forbids: a response carrying neither member is a failure Call cannot
-	// name, not a success whose result happens to be empty.
-	if len(resp.Result) == 0 {
+	// Defensive: the constructors and decoder never build a response with
+	// neither member, but an empty result must not read as a success.
+	if len(resp.Result()) == 0 {
 		return fmt.Errorf("jsonrpc: response for call %q carried neither result nor error", method)
 	}
 	return resp.Decode(result, opts)
@@ -120,7 +120,7 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 
 // Send round-trips req via the underlying Sender. Server-reported errors appear
 // in Response.Error, not in the error return; for a notification the Sender's
-// response is returned as-is (typically nil).
-func (c *Client) Send(ctx context.Context, req Request) (*Response, error) {
+// response is returned as-is (typically zero).
+func (c *Client) Send(ctx context.Context, req Request) (Response, error) {
 	return c.sender.Send(ctx, req)
 }

@@ -145,9 +145,9 @@ func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middlew
 	s.registerRaw(name, Raw(fn, s.opts), mw)
 }
 
-// Serve dispatches one request. A notification runs but returns nil. Handler
-// panics are not recovered.
-func (s *Server) Serve(ctx context.Context, req Request) *Response {
+// Serve dispatches one request. A notification runs but returns the zero
+// Response. Handler panics are not recovered.
+func (s *Server) Serve(ctx context.Context, req Request) Response {
 	// Read once, so an ErrorHandler that modifies req cannot change the reply's id.
 	id := req.ID()
 	if req.JSONRPC() != Version {
@@ -163,7 +163,7 @@ func (s *Server) Serve(ctx context.Context, req Request) *Response {
 	if !ok {
 		// The spec forbids replying to a notification, even an unknown method.
 		if req.IsNotification() {
-			return nil
+			return Response{}
 		}
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method())), id)
 	}
@@ -174,7 +174,7 @@ func (s *Server) Serve(ctx context.Context, req Request) *Response {
 		if err != nil {
 			s.handleError(ctx, req, err)
 		}
-		return nil
+		return Response{}
 	}
 	if err != nil {
 		return NewErrorResponse(s.handleError(ctx, req, err), id)
@@ -200,7 +200,7 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 		return s.marshalMessageError(e, id)
 	}
 	resp := s.Serve(ctx, req)
-	if resp == nil {
+	if resp.IsZero() {
 		return nil, nil
 	}
 	return marshalResponse(resp, s.options())
@@ -218,7 +218,7 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	if len(elems) == 0 {
 		return s.marshalMessageError(s.handleError(ctx, Request{}, NewError(CodeInvalidRequest, "empty batch")), ID{})
 	}
-	responses := make([]*Response, 0, len(elems))
+	responses := make([]Response, 0, len(elems))
 	for _, elem := range elems {
 		var req Request
 		if err := s.decode(elem, &req); err != nil {
@@ -227,7 +227,7 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 			responses = append(responses, NewErrorResponse(e, id))
 			continue
 		}
-		if resp := s.Serve(ctx, req); resp != nil {
+		if resp := s.Serve(ctx, req); !resp.IsZero() {
 			responses = append(responses, resp)
 		}
 	}

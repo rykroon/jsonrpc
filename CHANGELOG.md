@@ -7,7 +7,8 @@ version is 0, minor releases may carry breaking changes.
 ## [v0.6.0] — unreleased
 
 A breaking release. Request ids and params get their own types, `ID` and
-`Params`, in place of `jsontext.Value`, and `Error` is used by value.
+`Params`, in place of `jsontext.Value`, and `Error`, `Request`, and
+`Response` are used by value.
 
 ### Migrating from v0.5.0
 
@@ -27,10 +28,14 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `NewError(...) *Error` | `NewError(...) Error` |
 | `ErrorHandler func(...) *Error` | `ErrorHandler func(...) Error` |
 | `errors.AsType[*jsonrpc.Error](err)` | `errors.AsType[jsonrpc.Error](err)` |
-| `Response{Error: &Error{...}}` | unchanged; `Response.Error` stays a pointer |
 | `*Request` in `Serve`, `Sender`, `SenderFunc`, `ErrorHandler`, `Client.Send` | `Request` |
-| `req.Method`, `req.Params`, `req.ID`, `req.JSONRPC` | `req.Method()`, `req.Params()`, `req.ID()`, `req.Jsonrpc()` |
+| `req.Method`, `req.Params`, `req.ID`, `req.JSONRPC` | `req.Method()`, `req.Params()`, `req.ID()`, `req.JSONRPC()` |
 | `&Request{...}` | `NewRequest(...)` / `NewNotification(...)` |
+| `*Response` in `Serve`, `Sender`, `SenderFunc`, `Client.Send`, `NewSuccessResponse`, `NewErrorResponse`, `DecodeResponses` | `Response` |
+| `resp == nil` (notification) | `resp.IsZero()` |
+| `resp.Result`, `resp.ID`, `resp.JSONRPC` | `resp.Result()`, `resp.ID()`, `resp.JSONRPC()` |
+| `if resp.Error != nil { use(*resp.Error) }` | `if e, ok := resp.Error(); ok { use(e) }` |
+| `&Response{...}` | `NewSuccessResponse(...)` / `NewErrorResponse(...)` |
 
 `StringID` and `IntID` cannot fail, so the error handling around `NewID`
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
@@ -45,12 +50,15 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   everywhere and read through accessors, so it is never nil and an
   `ErrorHandler` cannot alter it. Build one with `NewRequest` or
   `NewNotification`; an `ErrorHandler` given no request sees the zero value.
+- **`Response` is an immutable value type.** Its fields are unexported and
+  read through accessors; `Error()` returns a copy and whether one is set.
+  `Serve` and `Sender` return the zero `Response`, not nil, for a
+  notification; check `IsZero()`.
 - **`Error` is a value type.** `NewError`, `WithData`, `ErrorHandler`, and
   `DefaultErrorHandler` use `Error` instead of `*Error`, and `Client.Call`
   returns server errors as `Error`. A handler can no longer return a typed-nil
   `*Error`, so the server's guards for it, and for an `ErrorHandler`
-  returning nil, are gone. Only `Response.Error` is a pointer, nil on
-  success. A handler returning a `*Error` is no longer recognized as
+  returning nil, are gone. A handler returning a `*Error` is no longer recognized as
   classified and goes to the `ErrorHandler` as an unclassified error.
 - **`errors.Is` matches `Error` by code.** `Error.Is` compares `Code` only,
   so a sentinel such as `ErrNotFound` matches after `WithData`, `%w`

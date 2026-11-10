@@ -19,8 +19,8 @@ Tests use `testify/require` and live in the package itself (`package jsonrpc`), 
 
 A transport-agnostic JSON-RPC 2.0 library. The root package has no I/O; transports sit on two seams:
 
-- **Server side:** `Server.Serve(ctx, *Request) *Response` for one decoded request, or `Server.ServeMessage(ctx, bytes)` which parses raw bytes (batches included) and returns response bytes.
-- **Client side:** the `Sender` interface (`Send(ctx, *Request) (*Response, error)`). `Server.Sender()` is the in-process one; `jsonrpchttp.Sender` POSTs over HTTP. `Client` wraps a `Sender` with `Call`/`Notify`.
+- **Server side:** `Server.Serve(ctx, Request) Response` for one decoded request (zero `Response` for a notification), or `Server.ServeMessage(ctx, bytes)` which parses raw bytes (batches included) and returns response bytes.
+- **Client side:** the `Sender` interface (`Send(ctx, Request) (Response, error)`). `Server.Sender()` is the in-process one; `jsonrpchttp.Sender` POSTs over HTTP. `Client` wraps a `Sender` with `Call`/`Notify`.
 
 `jsonrpchttp` is the only transport in-repo: `Handler` (an `http.Handler` around `ServeMessage`; JSON-RPC errors in-band with 200, notifications 204) and `Sender`.
 
@@ -32,7 +32,7 @@ Everything registered is stored as a `RawHandler` (`func(ctx, Params) (jsontext.
 
 ### Errors
 
-Handlers return a plain `error`. An `Error` means "already classified, send as-is"; anything else goes to the `ErrorHandler`, which sees *every* failure (decode, protocol, handler, and notification failures whose result is discarded). `Error` is a value type (only `Response.Error` is a pointer), so unwrap with `errors.AsType[Error]`.
+Handlers return a plain `error`. An `Error` means "already classified, send as-is"; anything else goes to the `ErrorHandler`, which sees *every* failure (decode, protocol, handler, and notification failures whose result is discarded). `Error`, `Request`, and `Response` are immutable value types (unexported fields, accessors), so unwrap with `errors.AsType[Error]`.
 
 ### Wire format and validation
 
