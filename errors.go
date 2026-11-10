@@ -28,28 +28,33 @@ type Error struct {
 	Data    jsontext.Value `json:"data,omitzero"`
 }
 
-func (e *Error) Error() string {
+func (e Error) Error() string {
 	return fmt.Sprintf("jsonrpc: %d %s", e.Code, e.Message)
 }
 
-func NewError(code int, message string) *Error {
-	return &Error{Code: code, Message: message}
+// Is reports whether target is an Error with the same code, so errors.Is
+// matches a sentinel even after WithData, wrapping, or a round trip.
+func (e Error) Is(target error) bool {
+	t, ok := target.(Error)
+	return ok && t.Code == e.Code
 }
 
-// WithData returns a copy of e with data marshaled into Data; e is unchanged,
-// so shared errors stay safe to reuse.
-func (e *Error) WithData(data any) (*Error, error) {
+func NewError(code int, message string) Error {
+	return Error{Code: code, Message: message}
+}
+
+// WithData returns a copy of e with data marshaled into Data.
+func (e Error) WithData(data any) (Error, error) {
 	b, err := json.Marshal(data)
 	if err != nil {
-		return nil, err
+		return Error{}, err
 	}
-	c := *e
-	c.Data = b
-	return &c, nil
+	e.Data = b
+	return e, nil
 }
 
 // UnmarshalData decodes the Data field into into. Empty Data is a no-op.
-func (e *Error) UnmarshalData(into any) error {
+func (e Error) UnmarshalData(into any) error {
 	if len(e.Data) == 0 {
 		return nil
 	}

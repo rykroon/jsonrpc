@@ -15,7 +15,7 @@ type Handler[P, R any] func(context.Context, P) (R, error)
 // RawHandler is the dispatch contract: undecoded params (zero when absent) in,
 // result bytes or an error out. A nil result encodes as `"result":null`.
 //
-// An *Error is sent as-is; any other error goes to the ErrorHandler, so
+// An Error is sent as-is; any other error goes to the ErrorHandler, so
 // wrapping with %w is fine.
 type RawHandler func(ctx context.Context, params Params) (jsontext.Value, error)
 
@@ -23,25 +23,21 @@ type RawHandler func(ctx context.Context, params Params) (jsontext.Value, error)
 type Middleware func(next RawHandler) RawHandler
 
 // ErrorHandler turns every error the server reports — a failed decode, a
-// handler's error, a protocol failure Serve detects — into the *Error sent
-// back. Returning nil is a bug, reported as an Internal error.
+// handler's error, a protocol failure Serve detects — into the Error sent
+// back.
 //
-// err is often already an *Error (Invalid params, Parse, Invalid Request);
+// err is often already an Error (Invalid params, Parse, Invalid Request);
 // anything else is unclassified. req is nil when nothing could be decoded,
 // and may be partial after a failed decode. For a notification the result is
 // discarded, but the handler still runs so the failure can be logged.
 // Changes to req do not reach the response.
-type ErrorHandler func(ctx context.Context, req *Request, err error) *Error
+type ErrorHandler func(ctx context.Context, req *Request, err error) Error
 
-// DefaultErrorHandler sends an *Error verbatim and reports anything else as an
+// DefaultErrorHandler sends an Error verbatim and reports anything else as an
 // Internal error carrying its message. Servers that must not leak internals
 // install their own.
-func DefaultErrorHandler(_ context.Context, _ *Request, err error) *Error {
-	if e, ok := errors.AsType[*Error](err); ok {
-		// A typed-nil *Error must not read as success, and Error() on it panics.
-		if e == nil {
-			return NewError(CodeInternalError, "nil *jsonrpc.Error returned as an error")
-		}
+func DefaultErrorHandler(_ context.Context, _ *Request, err error) Error {
+	if e, ok := errors.AsType[Error](err); ok {
 		return e
 	}
 	return NewError(CodeInternalError, err.Error())
@@ -113,15 +109,12 @@ func (s *Server) SetErrorHandler(h ErrorHandler) {
 	s.errorHandler = h
 }
 
-// handleError runs the ErrorHandler, substituting for a nil result.
-func (s *Server) handleError(ctx context.Context, req *Request, err error) *Error {
+// handleError runs the ErrorHandler.
+func (s *Server) handleError(ctx context.Context, req *Request, err error) Error {
 	s.mu.RLock()
 	h := s.errorHandler
 	s.mu.RUnlock()
-	if e := h(ctx, req, err); e != nil {
-		return e
-	}
-	return NewError(CodeInternalError, "error handler returned a nil *jsonrpc.Error")
+	return h(ctx, req, err)
 }
 
 // RegisterRaw installs h under name, wrapped with mw (mw[0] outermost) and then
@@ -256,14 +249,10 @@ func (s *Server) decode(data jsontext.Value, req *Request) error {
 	return json.Unmarshal(data, req, s.options())
 }
 
-// classifyDecodeError: an *Error wins; malformed JSON is a Parse error; the
+// classifyDecodeError: an Error wins; malformed JSON is a Parse error; the
 // rest is Invalid Request.
-func classifyDecodeError(err error) *Error {
-	if e, ok := errors.AsType[*Error](err); ok {
-		// A typed-nil *Error must not be surfaced, and Error() on it panics.
-		if e == nil {
-			return NewError(CodeInvalidRequest, "nil *jsonrpc.Error returned as an error")
-		}
+func classifyDecodeError(err error) Error {
+	if e, ok := errors.AsType[Error](err); ok {
 		return e
 	}
 	var syntaxErr *jsontext.SyntacticError
@@ -278,7 +267,7 @@ func classifyDecodeError(err error) *Error {
 }
 
 // marshalMessageError writes the error for a message that never reached Serve.
-func (s *Server) marshalMessageError(e *Error, id ID) (jsontext.Value, error) {
+func (s *Server) marshalMessageError(e Error, id ID) (jsontext.Value, error) {
 	return marshalResponse(NewErrorResponse(e, id), s.options())
 }
 

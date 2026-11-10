@@ -112,8 +112,8 @@ says you classified the failure yourself; anything else leaves that to the
 server, so handlers and middleware can wrap freely with `%w`:
 
 ```go
-s.SetErrorHandler(func(ctx context.Context, req *jsonrpc.Request, err error) *jsonrpc.Error {
-    if e, ok := errors.AsType[*jsonrpc.Error](err); ok && e != nil {
+s.SetErrorHandler(func(ctx context.Context, req *jsonrpc.Request, err error) jsonrpc.Error {
+    if e, ok := errors.AsType[jsonrpc.Error](err); ok {
         return e // already client-safe
     }
     log.Printf("rpc %s: %v", req.Method, err) // keep the detail off the wire
@@ -121,7 +121,7 @@ s.SetErrorHandler(func(ctx context.Context, req *jsonrpc.Request, err error) *js
 })
 ```
 
-The default sends `*Error` values through untouched and reports anything else
+The default sends `Error` values through untouched and reports anything else
 as an Internal error carrying the error's message.
 
 ## What it gives you
@@ -133,7 +133,7 @@ as an Internal error carrying the error's message.
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params
   marshaling, id generation, and result decoding; server errors come back
-  as `*Error`. `Client.Send` is the low-level escape hatch, round-tripping
+  as `Error`. `Client.Send` is the low-level escape hatch, round-tripping
   a `*Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
 - `Server.SetErrorHandler` — one place to decide what every failure looks
   like on the wire: sanitize messages, remap codes, attach `Data`, log the

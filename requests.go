@@ -106,7 +106,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 }
 
 // tokenError: a duplicate name is Invalid Request, anything else a Parse error.
-func tokenError(err error) *Error {
+func tokenError(err error) Error {
 	if errors.Is(err, jsontext.ErrDuplicateName) {
 		return NewError(CodeInvalidRequest, err.Error())
 	}

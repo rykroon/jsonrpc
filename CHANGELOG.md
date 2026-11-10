@@ -7,7 +7,7 @@ version is 0, minor releases may carry breaking changes.
 ## [v0.6.0] — unreleased
 
 A breaking release. Request ids and params get their own types, `ID` and
-`Params`, in place of `jsontext.Value`.
+`Params`, in place of `jsontext.Value`, and `Error` is used by value.
 
 ### Migrating from v0.5.0
 
@@ -24,6 +24,10 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `nil` params or id in a constructor | `Params{}` / `ID{}` |
 | `e.SetData(v)` | `e, err = e.WithData(v)` |
 | `e.MustSetData(v)` | `e, err = e.WithData(v)` (no panicking variant) |
+| `NewError(...) *Error` | `NewError(...) Error` |
+| `ErrorHandler func(...) *Error` | `ErrorHandler func(...) Error` |
+| `errors.AsType[*jsonrpc.Error](err)` | `errors.AsType[jsonrpc.Error](err)` |
+| `Response{Error: &Error{...}}` | unchanged; `Response.Error` stays a pointer |
 
 `StringID` and `IntID` cannot fail, so the error handling around `NewID`
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
@@ -34,6 +38,17 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 
 ### Changed
 
+- **`Error` is a value type.** `NewError`, `WithData`, `ErrorHandler`, and
+  `DefaultErrorHandler` use `Error` instead of `*Error`, and `Client.Call`
+  returns server errors as `Error`. A handler can no longer return a typed-nil
+  `*Error`, so the server's guards for it, and for an `ErrorHandler`
+  returning nil, are gone. Only `Response.Error` is a pointer, nil on
+  success. A handler returning a `*Error` is no longer recognized as
+  classified and goes to the `ErrorHandler` as an unclassified error.
+- **`errors.Is` matches `Error` by code.** `Error.Is` compares `Code` only,
+  so a sentinel such as `ErrNotFound` matches after `WithData`, `%w`
+  wrapping, or a round trip through `Client.Call`. Previously it matched
+  only the identical `*Error`.
 - **`Error.WithData` replaces `SetData` and `MustSetData`.** It returns a
   copy instead of mutating the receiver, so a shared error such as
   `var ErrNotFound = jsonrpc.NewError(...)` can't be changed by one request

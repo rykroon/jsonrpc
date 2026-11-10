@@ -190,12 +190,12 @@ func ExampleClient_SetOptions() {
 }
 
 // ExampleServer_SetErrorHandler keeps an unclassified failure's detail off the
-// wire. Errors the library classified arrive as *jsonrpc.Error and are already
+// wire. Errors the library classified arrive as jsonrpc.Error and are already
 // safe to send; anything else becomes a fixed message.
 func ExampleServer_SetErrorHandler() {
 	s := jsonrpc.NewServer()
-	s.SetErrorHandler(func(_ context.Context, req *jsonrpc.Request, err error) *jsonrpc.Error {
-		if e, ok := errors.AsType[*jsonrpc.Error](err); ok && e != nil {
+	s.SetErrorHandler(func(_ context.Context, req *jsonrpc.Request, err error) jsonrpc.Error {
+		if e, ok := errors.AsType[jsonrpc.Error](err); ok {
 			return e
 		}
 		fmt.Printf("log: rpc %s failed: %v\n", req.Method, err)

@@ -74,7 +74,7 @@ func (c *Client) options() json.Options {
 // Call invokes method with params (marshaled by NewParams) and decodes the
 // reply into result; a nil result skips decoding. The id comes from an internal
 // counter, and a response carrying a different id is an error. Errors reported
-// by the server are returned as *Error; any other error is a transport or
+// by the server are returned as Error; any other error is a transport or
 // decode failure.
 func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
 	opts := c.options()
@@ -96,7 +96,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 		return fmt.Errorf("jsonrpc: response id %s does not match request id %s for call %q", resp.ID, id, method)
 	}
 	if resp.Error != nil {
-		return resp.Error
+		return *resp.Error
 	}
 	// A Sender is free to build a Response itself, so guard the shape the spec
 	// forbids: a response carrying neither member is a failure Call cannot

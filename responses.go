@@ -35,11 +35,11 @@ func NewSuccessResponse(result jsontext.Value, id ID) *Response {
 }
 
 // NewErrorResponse builds a Response; a zero id becomes null.
-func NewErrorResponse(err *Error, id ID) *Response {
+func NewErrorResponse(err Error, id ID) *Response {
 	if id.IsZero() {
 		id = nullID()
 	}
-	return &Response{JSONRPC: Version, Error: err, ID: id}
+	return &Response{JSONRPC: Version, Error: &err, ID: id}
 }
 
 // Decode unmarshals r.Result into into under opts. Check r.Error first.

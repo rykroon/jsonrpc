@@ -32,7 +32,7 @@ Everything registered is stored as a `RawHandler` (`func(ctx, Params) (jsontext.
 
 ### Errors
 
-Handlers return a plain `error`. An `*Error` means "already classified, send as-is"; anything else goes to the `ErrorHandler`, which sees *every* failure (decode, protocol, handler, and notification failures whose result is discarded). Guard against typed-nil `*Error` wherever an error is unwrapped — see `DefaultErrorHandler` and `classifyDecodeError`.
+Handlers return a plain `error`. An `Error` means "already classified, send as-is"; anything else goes to the `ErrorHandler`, which sees *every* failure (decode, protocol, handler, and notification failures whose result is discarded). `Error` is a value type (only `Response.Error` is a pointer), so unwrap with `errors.AsType[Error]`.
 
 ### Wire format and validation
 

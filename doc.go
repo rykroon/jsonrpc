@@ -49,7 +49,7 @@
 //
 // The options are used as given, and json/v2 consults them before a type's
 // methods, so an unmarshaler for *Request or a marshaler for *Response takes
-// over the envelope and can delegate to the type's own method. An *Error from
+// over the envelope and can delegate to the type's own method. An Error from
 // such an unmarshaler is sent as-is; any other error is a Parse error or an
 // Invalid Request, and Serve still validates every Request it dispatches. A
 // marshaler's error has no response left to carry it, so it surfaces as
@@ -66,17 +66,17 @@
 //
 // # Errors
 //
-// Handler and RawHandler return a plain error. An *Error names the code,
+// Handler and RawHandler return a plain error. An Error names the code,
 // message, and Data; anything else, wrapped or not, is left to the
 // ErrorHandler installed with Server.SetErrorHandler, which sees every failure
 // the server reports, notifications included.
 //
-// DefaultErrorHandler sends an *Error verbatim and reports anything else as an
+// DefaultErrorHandler sends an Error verbatim and reports anything else as an
 // Internal error carrying its message. A server that must not leak internals
 // installs its own:
 //
-//	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) *Error {
-//		if e, ok := errors.AsType[*jsonrpc.Error](err); ok && e != nil {
+//	s.SetErrorHandler(func(ctx context.Context, req *Request, err error) jsonrpc.Error {
+//		if e, ok := errors.AsType[jsonrpc.Error](err); ok {
 //			return e // a classified failure is already client-safe
 //		}
 //		log.Printf("rpc %s: %v", req.Method, err)
@@ -88,7 +88,7 @@
 // Client wraps a Sender, which round-trips a Request to a Response over some
 // transport: Server.Sender in-process, jsonrpchttp over HTTP, or your own.
 // Client.Call marshals params, sends, and decodes the result, returning
-// server-reported errors as *Error; Client.Notify sends a notification.
+// server-reported errors as Error; Client.Notify sends a notification.
 // Client.SetOptions gives both the same json/v2 options the server uses. For
 // full control build a Request with NewRequest or NewNotification and send it
 // with Client.Send.
