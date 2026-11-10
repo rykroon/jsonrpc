@@ -99,12 +99,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 	if isErr {
 		return rpcErr
 	}
-	// Defensive: the constructors and decoder never build a response with
-	// neither member, but an empty result must not read as a success.
-	if len(resp.Result()) == 0 {
-		return fmt.Errorf("jsonrpc: response for call %q carried neither result nor error", method)
-	}
-	return resp.Decode(result, opts)
+	return resp.DecodeResult(result, opts)
 }
 
 // Notify sends a notification: the server dispatches method but produces no

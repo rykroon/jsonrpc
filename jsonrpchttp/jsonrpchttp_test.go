@@ -50,7 +50,7 @@ func TestHandlerRoundTrip(t *testing.T) {
 	require.False(t, isErr)
 
 	var result int
-	require.NoError(t, resp.Decode(&result))
+	require.NoError(t, resp.DecodeResult(&result))
 	assert.Equal(t, 8, result)
 }
 
@@ -89,7 +89,7 @@ func TestHandlerReturnsMethodNotFound(t *testing.T) {
 	require.NoError(t, err)
 	rpcErr, isErr := resp.Error()
 	require.True(t, isErr)
-	assert.Equal(t, jsonrpc.CodeMethodNotFound, rpcErr.Code)
+	assert.Equal(t, jsonrpc.CodeMethodNotFound, rpcErr.Code())
 }
 
 func TestHandlerParseError(t *testing.T) {

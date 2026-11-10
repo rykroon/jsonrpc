@@ -60,13 +60,13 @@ func (p Params) String() string {
 	return string(p.value)
 }
 
-// DecodeInto unmarshals the params into v under opts. Absent params leave v
+// Decode unmarshals the params into into under opts. Absent params leave into
 // untouched, as typed handlers do.
-func (p Params) DecodeInto(v any, opts ...json.Options) error {
+func (p Params) Decode(into any, opts ...json.Options) error {
 	if p.IsZero() {
 		return nil
 	}
-	return json.Unmarshal(p.value, v, opts...)
+	return json.Unmarshal(p.value, into, opts...)
 }
 
 // Map splits an object's members without decoding them.
@@ -75,7 +75,7 @@ func (p Params) Map() (map[string]jsontext.Value, error) {
 		return nil, errors.New("jsonrpc: params must be a JSON object")
 	}
 	m := map[string]jsontext.Value{}
-	if err := p.DecodeInto(&m); err != nil {
+	if err := p.Decode(&m); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -87,7 +87,7 @@ func (p Params) Slice() ([]jsontext.Value, error) {
 		return nil, errors.New("jsonrpc: params must be a JSON array")
 	}
 	s := []jsontext.Value{}
-	if err := p.DecodeInto(&s); err != nil {
+	if err := p.Decode(&s); err != nil {
 		return nil, err
 	}
 	return s, nil

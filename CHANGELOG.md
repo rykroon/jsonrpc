@@ -25,6 +25,10 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `nil` params or id in a constructor | `Params{}` / `ID{}` |
 | `e.SetData(v)` | `e, err = e.WithData(v)` |
 | `e.MustSetData(v)` | `e, err = e.WithData(v)` (no panicking variant) |
+| `e.Code`, `e.Message`, `e.Data` (fields) | `e.Code()`, `e.Message()`, `e.Data()` (a copy) |
+| `Error{Code: c, Message: m, Data: d}` | `NewError(c, m).WithData(v)` |
+| `e.UnmarshalData(&v)` | `e.DecodeData(&v)` |
+| `resp.Decode(&v)` | `resp.DecodeResult(&v)` |
 | `NewError(...) *Error` | `NewError(...) Error` |
 | `ErrorHandler func(...) *Error` | `ErrorHandler func(...) Error` |
 | `errors.AsType[*jsonrpc.Error](err)` | `errors.AsType[jsonrpc.Error](err)` |
@@ -39,7 +43,7 @@ A breaking release. Request ids and params get their own types, `ID` and
 
 `StringID` and `IntID` cannot fail, so the error handling around `NewID`
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
-`params.String()`, decode with `params.DecodeInto`, and build replacement
+`params.String()`, decode with `params.Decode`, and build replacement
 params with `NewParams`; the result stays `jsontext.Value`. A custom
 `*Request` unmarshaler builds the fields by decoding into them
 (`json.Unmarshal(raw, &req.ID)`) or with `NewParams(jsontext.Value(raw))`.
@@ -51,7 +55,8 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   `ErrorHandler` cannot alter it. Build one with `NewRequest` or
   `NewNotification`; an `ErrorHandler` given no request sees the zero value.
 - **`Response` is an immutable value type.** Its fields are unexported and
-  read through accessors; `Error()` returns a copy and whether one is set.
+  read through accessors; `Error()` returns a copy and whether one is set,
+  and `Result()` returns a copy of the raw bytes.
   `Serve` and `Sender` return the zero `Response`, not nil, for a
   notification; check `IsZero()`.
 - **`Error` is a value type.** `NewError`, `WithData`, `ErrorHandler`, and
@@ -60,7 +65,7 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   `*Error`, so the server's guards for it, and for an `ErrorHandler`
   returning nil, are gone. A handler returning a `*Error` is no longer recognized as
   classified and goes to the `ErrorHandler` as an unclassified error.
-- **`errors.Is` matches `Error` by code.** `Error.Is` compares `Code` only,
+- **`errors.Is` matches `Error` by code.** `Error.Is` compares the code only,
   so a sentinel such as `ErrNotFound` matches after `WithData`, `%w`
   wrapping, or a round trip through `Client.Call`. Previously it matched
   only the identical `*Error`.
@@ -69,6 +74,16 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   `var ErrNotFound = jsonrpc.NewError(...)` can't be changed by one request
   and leak into another. There is no panicking variant; handle the marshal
   error.
+- **`Error` is immutable.** Its fields are unexported: build one with
+  `NewError` and `WithData`, and read it with `Code()`, `Message()`, and
+  `Data()`, which returns a copy, so an `Error` never shares data bytes with
+  a caller. `Error` reads and writes its own JSON, and decoding anything but
+  an object into it is an error.
+- **Decoding methods share one name and signature.** Each is `Decode` plus
+  the member it decodes and takes `(into any, opts ...json.Options)`:
+  `Response.Decode` is `Response.DecodeResult`, and `Error.UnmarshalData` is
+  `Error.DecodeData`, which now accepts options. An absent value leaves
+  `into` untouched.
 - **`ID` replaces `jsontext.Value` ids; `NewID` and `MustNewID` are removed.**
   `ID` holds its JSON encoding, so ids compare with `==` and work as map keys.
   Decoded string ids are re-escaped minimally so differently escaped ids
@@ -93,7 +108,7 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 
 - **`ID`** — `StringID`, `IntID`, `IsZero`, `IsNull`, `String`, and its own
   `MarshalJSONTo` / `UnmarshalJSONFrom`.
-- **`Params`** — `IsObject`, `IsArray`, `IsZero`, `String`, `DecodeInto`,
+- **`Params`** — `IsObject`, `IsArray`, `IsZero`, `String`, `Decode`,
   `Map` and `Slice` (members left undecoded, so numbers are not rounded), and
   its own `MarshalJSONTo` / `UnmarshalJSONFrom`.
 

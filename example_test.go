@@ -78,7 +78,7 @@ func ExampleClient_Send() {
 		return
 	}
 	var greeting string
-	_ = resp.Decode(&greeting)
+	_ = resp.DecodeResult(&greeting)
 	fmt.Println(greeting)
 	// Output: hello world
 }

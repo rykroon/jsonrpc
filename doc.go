@@ -105,7 +105,8 @@
 // # Polymorphic fields
 //
 // Response.Result and Error.Data are jsontext.Value because the spec leaves
-// their types open; Register and Raw decode params and results for you.
+// their types open; both return copies, so the bytes a Response or Error holds
+// cannot be altered. Register and Raw decode params and results for you.
 //
 // The two the spec does constrain have their own types. Params holds an
 // object or array, or is zero when absent; NewParams enforces the shape. ID

@@ -27,29 +27,29 @@ func TestParamsKinds(t *testing.T) {
 	require.Equal(t, "", zero.String())
 }
 
-func TestParamsDecodeInto(t *testing.T) {
+func TestParamsDecode(t *testing.T) {
 	t.Run("decodes", func(t *testing.T) {
 		var got addParams
-		require.NoError(t, mustParams(t, addParams{A: 1, B: 2}).DecodeInto(&got))
+		require.NoError(t, mustParams(t, addParams{A: 1, B: 2}).Decode(&got))
 		require.Equal(t, addParams{A: 1, B: 2}, got)
 	})
 
 	t.Run("zero leaves the target untouched", func(t *testing.T) {
 		got := addParams{A: 9}
-		require.NoError(t, Params{}.DecodeInto(&got))
+		require.NoError(t, Params{}.Decode(&got))
 		require.Equal(t, addParams{A: 9}, got)
 	})
 
 	t.Run("honors options", func(t *testing.T) {
 		p := mustParams(t, jsontext.Value(`{"a":1,"extra":true}`))
 		var got addParams
-		require.NoError(t, p.DecodeInto(&got), "unknown members are tolerated by default")
-		require.Error(t, p.DecodeInto(&got, json.RejectUnknownMembers(true)))
+		require.NoError(t, p.Decode(&got), "unknown members are tolerated by default")
+		require.Error(t, p.Decode(&got, json.RejectUnknownMembers(true)))
 	})
 
 	t.Run("a mismatch is an error", func(t *testing.T) {
 		var got addParams
-		require.Error(t, mustParams(t, []int{1}).DecodeInto(&got))
+		require.Error(t, mustParams(t, []int{1}).Decode(&got))
 	})
 }
 

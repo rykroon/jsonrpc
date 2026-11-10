@@ -13,25 +13,32 @@ import (
 // NewErrorResponse. The zero Response stands for no response, as Serve
 // returns for a notification. MarshalJSONTo and UnmarshalJSONFrom walk the
 // object themselves, so a shape the spec forbids never crosses the wire.
+//
+// A success response always holds a non-empty result (JSON null at the
+// least), so an empty result on a non-zero Response marks an error response
+// and error is read only then.
 type Response struct {
 	jsonrpc string
 	result  jsontext.Value
-	error   *Error // never shared; Error returns a copy
+	error   Error
 	id      ID
 }
 
 func (r Response) JSONRPC() string { return r.jsonrpc }
 
-// Result is the raw result, nil on an error response.
-func (r Response) Result() jsontext.Value { return r.result }
+// Result returns a copy of the raw result, nil on an error response.
+func (r Response) Result() jsontext.Value { return r.result.Clone() }
 
 // Error returns the error and true on an error response.
 func (r Response) Error() (Error, bool) {
-	if r.error == nil {
+	if !r.isError() {
 		return Error{}, false
 	}
-	return *r.error, true
+	return r.error, true
 }
+
+// isError reports whether r is an error response.
+func (r Response) isError() bool { return len(r.result) == 0 && !r.IsZero() }
 
 func (r Response) ID() ID { return r.id }
 
@@ -59,11 +66,12 @@ func NewErrorResponse(err Error, id ID) Response {
 	if id.IsZero() {
 		id = nullID()
 	}
-	return Response{jsonrpc: Version, error: &err, id: id}
+	return Response{jsonrpc: Version, error: err, id: id}
 }
 
-// Decode unmarshals the result into into under opts. Check Error first.
-func (r Response) Decode(into any, opts ...json.Options) error {
+// DecodeResult unmarshals the result into into under opts. Check Error first;
+// an error response has no result and leaves into untouched.
+func (r Response) DecodeResult(into any, opts ...json.Options) error {
 	if into == nil || len(r.result) == 0 {
 		return nil
 	}
@@ -71,13 +79,10 @@ func (r Response) Decode(into any, opts ...json.Options) error {
 }
 
 // MarshalJSONTo writes the canonical object — Version, result or error, id —
-// and reports a response holding both members or neither instead of sending
-// it. A marshaler for *Response in a Server's options overrides this.
+// and reports the zero Response, which holds neither member, instead of
+// sending it. A marshaler for *Response in a Server's options overrides this.
 func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
-	switch {
-	case r.error != nil && len(r.result) > 0:
-		return errors.New("jsonrpc: response has both result and error")
-	case r.error == nil && len(r.result) == 0:
+	if len(r.result) == 0 && r.IsZero() {
 		return errors.New("jsonrpc: response has neither result nor error")
 	}
 
@@ -90,11 +95,11 @@ func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if err := enc.WriteToken(jsontext.String(Version)); err != nil {
 		return err
 	}
-	if r.error != nil {
+	if len(r.result) == 0 {
 		if err := enc.WriteToken(jsontext.String("error")); err != nil {
 			return err
 		}
-		// A struct, so MarshalEncode takes it mid-stream with enc's options.
+		// MarshalEncode takes it mid-stream with enc's options.
 		if err := json.MarshalEncode(enc, r.error); err != nil {
 			return err
 		}
@@ -137,6 +142,8 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 
 	// The receiver is replaced only once the checks pass.
 	var resp Response
+	// Error's zero value is a valid error object, so presence is tracked here.
+	var hasError bool
 	for d.PeekKind() != jsontext.KindEndObject {
 		tok, err := d.ReadToken()
 		if err != nil {
@@ -164,10 +171,11 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			resp.result = jsontext.Value(val.Clone())
 
 		case "error":
-			// A struct, so UnmarshalDecode takes it mid-stream with d's options.
+			// UnmarshalDecode takes it mid-stream with d's options.
 			if err := json.UnmarshalDecode(d, &resp.error); err != nil {
 				return decodeResponseError(err)
 			}
+			hasError = true
 
 		case "id":
 			val, err := d.ReadValue()
@@ -199,9 +207,9 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 		return errors.New("jsonrpc: response has no id")
 	}
 	switch {
-	case resp.result != nil && resp.error != nil:
+	case resp.result != nil && hasError:
 		return errors.New("jsonrpc: response has both result and error")
-	case resp.result == nil && resp.error == nil:
+	case resp.result == nil && !hasError:
 		return errors.New("jsonrpc: response has neither result nor error")
 	}
 	*r = resp
