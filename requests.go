@@ -16,7 +16,7 @@ type Request struct {
 	id      ID
 }
 
-func (req *Request) Jsonrpc() string {
+func (req *Request) JSONRPC() string {
 	return req.jsonrpc
 }
 
@@ -45,28 +45,28 @@ func (req *Request) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if err := enc.WriteToken(jsontext.String("jsonrpc")); err != nil {
 		return err
 	}
-	if err := enc.WriteToken(jsontext.String(req.jsonrpc)); err != nil {
+	if err := enc.WriteToken(jsontext.String(req.JSONRPC())); err != nil {
 		return err
 	}
 	if err := enc.WriteToken(jsontext.String("method")); err != nil {
 		return err
 	}
-	if err := enc.WriteToken(jsontext.String(req.method)); err != nil {
+	if err := enc.WriteToken(jsontext.String(req.Method())); err != nil {
 		return err
 	}
-	if !req.params.IsZero() {
+	if !req.Params().IsZero() {
 		if err := enc.WriteToken(jsontext.String("params")); err != nil {
 			return err
 		}
-		if err := req.params.MarshalJSONTo(enc); err != nil {
+		if err := req.Params().MarshalJSONTo(enc); err != nil {
 			return err
 		}
 	}
-	if !req.id.IsZero() {
+	if !req.ID().IsZero() {
 		if err := enc.WriteToken(jsontext.String("id")); err != nil {
 			return err
 		}
-		if err := req.id.MarshalJSONTo(enc); err != nil {
+		if err := req.ID().MarshalJSONTo(enc); err != nil {
 			return err
 		}
 	}

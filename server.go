@@ -149,26 +149,26 @@ func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middlew
 // panics are not recovered.
 func (s *Server) Serve(ctx context.Context, req Request) *Response {
 	// Read once, so an ErrorHandler that modifies req cannot change the reply's id.
-	id := req.id
-	if req.jsonrpc != Version {
+	id := req.ID()
+	if req.JSONRPC() != Version {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`)), id)
 	}
-	if req.method == "" {
+	if req.Method() == "" {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, "missing method")), id)
 	}
 
 	s.mu.RLock()
-	h, ok := s.methods[req.method]
+	h, ok := s.methods[req.Method()]
 	s.mu.RUnlock()
 	if !ok {
 		// The spec forbids replying to a notification, even an unknown method.
 		if req.IsNotification() {
 			return nil
 		}
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.method)), id)
+		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method())), id)
 	}
 
-	result, err := h(ctx, req.params)
+	result, err := h(ctx, req.Params())
 	if req.IsNotification() {
 		// No reply, but the ErrorHandler still runs so it can log.
 		if err != nil {
@@ -194,7 +194,7 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	}
 	var req Request
 	if err := s.decode(data, &req); err != nil {
-		id := req.id
+		id := req.ID()
 		e := s.handleError(ctx, req, classifyDecodeError(err))
 		// An id read before the failure lets the client correlate.
 		return s.marshalMessageError(e, id)
@@ -222,7 +222,7 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	for _, elem := range elems {
 		var req Request
 		if err := s.decode(elem, &req); err != nil {
-			id := req.id
+			id := req.ID()
 			e := s.handleError(ctx, req, classifyDecodeError(err))
 			responses = append(responses, NewErrorResponse(e, id))
 			continue
