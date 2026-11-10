@@ -15,7 +15,7 @@ import (
 func Raw[P, R any](fn Handler[P, R], opts ...json.Options) RawHandler {
 	return func(ctx context.Context, params Params) (jsontext.Value, error) {
 		var p P
-		if err := params.DecodeInto(&p, opts...); err != nil {
+		if err := params.Decode(&p, opts...); err != nil {
 			return nil, NewError(CodeInvalidParams, err.Error())
 		}
 		r, err := fn(ctx, p)

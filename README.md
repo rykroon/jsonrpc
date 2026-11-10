@@ -112,11 +112,11 @@ says you classified the failure yourself; anything else leaves that to the
 server, so handlers and middleware can wrap freely with `%w`:
 
 ```go
-s.SetErrorHandler(func(ctx context.Context, req *jsonrpc.Request, err error) jsonrpc.Error {
+s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) jsonrpc.Error {
     if e, ok := errors.AsType[jsonrpc.Error](err); ok {
         return e // already client-safe
     }
-    log.Printf("rpc %s: %v", req.Method, err) // keep the detail off the wire
+    log.Printf("rpc %s: %v", req.Method(), err) // keep the detail off the wire
     return jsonrpc.NewError(jsonrpc.CodeInternalError, "internal error")
 })
 ```
@@ -134,7 +134,7 @@ as an Internal error carrying the error's message.
 - `Client.Call` / `Client.Notify` — one-line method calls with params
   marshaling, id generation, and result decoding; server errors come back
   as `Error`. `Client.Send` is the low-level escape hatch, round-tripping
-  a `*Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
+  a `Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
 - `Server.SetErrorHandler` — one place to decide what every failure looks
   like on the wire: sanitize messages, remap codes, attach `Data`, log the
   cause. Also called for notification failures, which send no reply.
@@ -149,7 +149,7 @@ as an Internal error carrying the error's message.
 - `Params` / `NewParams` — a request's params. `NewParams` requires an object
   or an array (§4.2), so a scalar — or a typed nil, which marshals to `null` —
   fails locally instead of as an Invalid Request from the far end. `nil` gives
-  zero `Params`, which sends none. `DecodeInto`, `Map`, and `Slice` read them.
+  zero `Params`, which sends none. `Decode`, `Map`, and `Slice` read them.
 - `ID` / `StringID` / `IntID` — a request id, held as its JSON encoding
   so ids compare with `==` and work as map keys. The constructors cannot fail;
   a zero `ID` is a notification. `String` returns the JSON form, so `"1"` and
@@ -157,10 +157,11 @@ as an Internal error carrying the error's message.
 - `Request` — a plain struct of `Params` and `ID`. It
   decodes itself with `UnmarshalJSONFrom`, so the strict envelope check applies
   to any `json.Unmarshal` into one, not only the ones a `Server` drives.
-- `Response` — one struct for both shapes the spec allows: exactly one of
-  `Result` and `Error` is set, and `ID` is always present. `resp.Error != nil`
-  tells the two apart, and `Decode` unmarshals a successful result into a
-  target. `NewSuccessResponse` / `NewErrorResponse` normalize an empty result
+- `Response` — an immutable value for both shapes the spec allows: exactly
+  one of `Result()` and `Error()` is set, and `ID()` is always present.
+  `e, ok := resp.Error()` tells the two apart, and `DecodeResult` unmarshals a
+  successful result into a target. The zero `Response` means no response
+  (`Serve` and `Sender` return it for a notification); check `IsZero()`. `NewSuccessResponse` / `NewErrorResponse` normalize an empty result
   or id to JSON null, and it writes itself in canonical form with
   `MarshalJSONTo` and reads itself with `UnmarshalJSONFrom`, so any
   `json.Unmarshal` into one checks the spec's invariants — what a `Sender`

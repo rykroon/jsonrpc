@@ -73,12 +73,12 @@ func ExampleClient_Send() {
 		fmt.Println("transport error:", err)
 		return
 	}
-	if resp.Error != nil {
-		fmt.Println("rpc error:", resp.Error)
+	if e, ok := resp.Error(); ok {
+		fmt.Println("rpc error:", e)
 		return
 	}
 	var greeting string
-	_ = resp.Decode(&greeting)
+	_ = resp.DecodeResult(&greeting)
 	fmt.Println(greeting)
 	// Output: hello world
 }
@@ -194,11 +194,11 @@ func ExampleClient_SetOptions() {
 // safe to send; anything else becomes a fixed message.
 func ExampleServer_SetErrorHandler() {
 	s := jsonrpc.NewServer()
-	s.SetErrorHandler(func(_ context.Context, req *jsonrpc.Request, err error) jsonrpc.Error {
+	s.SetErrorHandler(func(_ context.Context, req jsonrpc.Request, err error) jsonrpc.Error {
 		if e, ok := errors.AsType[jsonrpc.Error](err); ok {
 			return e
 		}
-		fmt.Printf("log: rpc %s failed: %v\n", req.Method, err)
+		fmt.Printf("log: rpc %s failed: %v\n", req.Method(), err)
 		return jsonrpc.NewError(jsonrpc.CodeInternalError, "internal error")
 	})
 	s.Register("lookup", func(_ context.Context, _ struct{}) (string, error) {

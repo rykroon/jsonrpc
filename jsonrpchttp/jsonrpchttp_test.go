@@ -45,11 +45,12 @@ func TestHandlerRoundTrip(t *testing.T) {
 
 	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", params, jsonrpc.IntID(1)))
 	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.Nil(t, resp.Error)
+	require.False(t, resp.IsZero())
+	_, isErr := resp.Error()
+	require.False(t, isErr)
 
 	var result int
-	require.NoError(t, resp.Decode(&result))
+	require.NoError(t, resp.DecodeResult(&result))
 	assert.Equal(t, 8, result)
 }
 
@@ -73,12 +74,12 @@ func TestHandlerNotificationReturns204(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
-func TestSenderNotificationReturnsNil(t *testing.T) {
+func TestSenderNotificationReturnsZero(t *testing.T) {
 	_, client := newTestHTTP(t)
 
 	resp, err := client.Send(context.Background(), jsonrpc.NewNotification("addOne", jsonrpc.Params{}))
 	require.NoError(t, err)
-	assert.Nil(t, resp)
+	assert.True(t, resp.IsZero())
 }
 
 func TestHandlerReturnsMethodNotFound(t *testing.T) {
@@ -86,9 +87,9 @@ func TestHandlerReturnsMethodNotFound(t *testing.T) {
 
 	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("missing", jsonrpc.Params{}, jsonrpc.StringID("x")))
 	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.NotNil(t, resp.Error)
-	assert.Equal(t, jsonrpc.CodeMethodNotFound, resp.Error.Code)
+	rpcErr, isErr := resp.Error()
+	require.True(t, isErr)
+	assert.Equal(t, jsonrpc.CodeMethodNotFound, rpcErr.Code())
 }
 
 func TestHandlerParseError(t *testing.T) {
@@ -149,8 +150,8 @@ func TestHandlerBatchRoundTrip(t *testing.T) {
 	resps, err := jsonrpc.DecodeResponses(body)
 	require.NoError(t, err)
 	require.Len(t, resps, 2)
-	assert.JSONEq(t, "2", string(resps[0].Result))
-	assert.JSONEq(t, "11", string(resps[1].Result))
+	assert.JSONEq(t, "2", string(resps[0].Result()))
+	assert.JSONEq(t, "11", string(resps[1].Result()))
 }
 
 func TestHandlerBatchAllNotificationsReturns204(t *testing.T) {
@@ -173,7 +174,7 @@ func TestSenderRejectsNon2xxStatus(t *testing.T) {
 
 	resp, err := client.Send(context.Background(), jsonrpc.NewRequest("addOne", jsonrpc.Params{}, jsonrpc.IntID(1)))
 	require.Error(t, err)
-	assert.Nil(t, resp)
+	assert.True(t, resp.IsZero())
 	assert.Contains(t, err.Error(), "502")
 
 	err = client.Notify(context.Background(), "addOne", nil)

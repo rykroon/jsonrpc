@@ -13,7 +13,7 @@ import (
 
 // Sender is a jsonrpc.Sender that round-trips Requests over HTTP: each Send
 // POSTs the marshaled Request to URL and decodes one Response from the reply
-// body. Notifications return (nil, nil).
+// body. Notifications return a zero Response.
 //
 // For custom headers or authentication, give Client a Transport that injects
 // them, or compose a jsonrpc.SenderFunc around this Sender.
@@ -27,15 +27,15 @@ type Sender struct {
 }
 
 // Send implements jsonrpc.Sender.
-func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Response, error) {
+func (s *Sender) Send(ctx context.Context, req jsonrpc.Request) (jsonrpc.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("jsonrpchttp: marshal request: %w", err)
+		return jsonrpc.Response{}, fmt.Errorf("jsonrpchttp: marshal request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.URL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return jsonrpc.Response{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
@@ -47,7 +47,7 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Respo
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return jsonrpc.Response{}, err
 	}
 	defer resp.Body.Close()
 
@@ -55,27 +55,27 @@ func (s *Sender) Send(ctx context.Context, req *jsonrpc.Request) (*jsonrpc.Respo
 	// response; surface it as a transport error, not a decode failure.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("jsonrpchttp: unexpected HTTP status %s", resp.Status)
+		return jsonrpc.Response{}, fmt.Errorf("jsonrpchttp: unexpected HTTP status %s", resp.Status)
 	}
 
 	if req.IsNotification() {
 		io.Copy(io.Discard, resp.Body)
-		return nil, nil
+		return jsonrpc.Response{}, nil
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
-		return nil, nil
+		return jsonrpc.Response{}, nil
 	}
 
 	// Read the body fully so the underlying connection can be reused.
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("jsonrpchttp: read response: %w", err)
+		return jsonrpc.Response{}, fmt.Errorf("jsonrpchttp: read response: %w", err)
 	}
-	var rpcResp *jsonrpc.Response
+	var rpcResp jsonrpc.Response
 	err = json.Unmarshal(data, &rpcResp)
 	if err != nil {
-		return nil, fmt.Errorf("jsonrpchttp: %w", err)
+		return jsonrpc.Response{}, fmt.Errorf("jsonrpchttp: %w", err)
 	}
 	return rpcResp, nil
 }

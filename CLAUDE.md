@@ -1,49 +1,43 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+# References
+- JSON-RPC Specification: https://www.jsonrpc.org/specification
+- Google Golang style guide: https://google.github.io/styleguide/go/
 
-## Commands
+# JSON-RPC types
 
-Requires Go 1.27+ (generic methods, `encoding/json/v2` — no GOEXPERIMENT needed).
+The JSON-RPC types just represent data. They should be immutable in the right context. For example a client should not be able to alter the response it gets back from a server. And the server should not be able to alter the request is receives from the client.
 
-```sh
-go vet ./...                              # CI runs vet + test
-go test ./...
-go test -run TestMethodNotFound .         # single test in the root package
-go test -run TestName ./jsonrpchttp       # single test in the HTTP subpackage
-```
+The types should be written in a way so that an instance of a type can never express an invalid state as described in the JSONRPC specification. For example Params can only ever be a JSON object or array (or be empty). An ID can only ever be a string, number, or null (or empty).
 
-Tests use `testify/require` and live in the package itself (`package jsonrpc`), so they can reach unexported helpers. `example_test.go` holds runnable godoc examples whose `// Output:` is checked by `go test`.
+type Request struct {}
 
-## Architecture
+type Response struct {}
 
-A transport-agnostic JSON-RPC 2.0 library. The root package has no I/O; transports sit on two seams:
+type ID struct {}
+For IDs, on the client side, one should only ever be able to create a StringID() or an IntID(). But on the server side it is more laxed as the server is just meant to echo the id back to the client. So explicitely null ids and numbers containing fractional parts are allowed on the server side. However anything other than that should be considered an invalid state.
 
-- **Server side:** `Server.Serve(ctx, *Request) *Response` for one decoded request, or `Server.ServeMessage(ctx, bytes)` which parses raw bytes (batches included) and returns response bytes.
-- **Client side:** the `Sender` interface (`Send(ctx, *Request) (*Response, error)`). `Server.Sender()` is the in-process one; `jsonrpchttp.Sender` POSTs over HTTP. `Client` wraps a `Sender` with `Call`/`Notify`.
+type Params struct {}
 
-`jsonrpchttp` is the only transport in-repo: `Handler` (an `http.Handler` around `ServeMessage`; JSON-RPC errors in-band with 200, notifications 204) and `Sender`.
+type Error struct {}
+An Error should implement the error interface.
 
-### Dispatch pipeline
 
-Everything registered is stored as a `RawHandler` (`func(ctx, Params) (jsontext.Value, error)`). `Server.Register` takes a typed `Handler[P, R]` and converts it with `Raw(fn, s.opts)` (`typed.go`), which decodes params into `P` (failure → Invalid params) and marshals `R`. `Middleware` is `func(RawHandler) RawHandler`, so it works uniformly over typed and raw methods. Composition: server-wide middleware (`Use`) wraps per-method middleware, `mw[0]` outermost.
+# Architecture
 
-`Use`, `SetOptions`, and `SetErrorHandler` all panic once any method is registered — options are captured at registration time.
+The jsonrpc package should be Transport agnostic. Subpackages can be created for transport-specific impementations, such as jsonrpchttp
 
-### Errors
+## Client Side
 
-Handlers return a plain `error`. An `Error` means "already classified, send as-is"; anything else goes to the `ErrorHandler`, which sees *every* failure (decode, protocol, handler, and notification failures whose result is discarded). `Error` is a value type (only `Response.Error` is a pointer), so unwrap with `errors.AsType[Error]`.
+The sender interface is designed to send a request over a specific transport. (HTTP, Websocks, etc).
 
-### Wire format and validation
+The client encapsulates everything needed for sending a jsonrpc request, including the sender.
 
-- All JSON uses `encoding/json/v2` and `jsontext`. `Result` and `Error.Data` are `jsontext.Value`; `Params` (`params.go`) wraps an object/array value, and `ID` (`id.go`) holds its JSON encoding in a `string` so IDs compare with `==`.
-- `Request.UnmarshalJSONFrom` (`requests.go`) is a hand-written token walk that enforces the spec strictly: unknown envelope members, duplicate names, non-structured or `null` params are Invalid Request. Unknown members *inside* params are tolerated.
-- `Response.MarshalJSONTo` / `UnmarshalJSONFrom` (`responses.go`) enforce "exactly one of result/error, id always present".
-- Constructors enforce the spec on the sending side too: `NewParams` requires object/array; `StringID`/`IntID` cannot fail. A zero `ID` means notification, so it must never be produced silently.
-- `Server.SetOptions` / `Client.SetOptions` options are passed through as-is, so a user-installed unmarshaler for `*Request` or marshaler for `*Response` replaces the envelope codec.
+## Server Side
+A server can register methods. Method handlers can be in the form of a "Typed" Handler or a RawHandler.
 
-## Conventions
+A RawHandler passes the Params and expects a jsontext.Value for the result.
+A typed Handler passes P any (The Params type) and expects T any (The Result type.)
 
-- Keep doc comments short — this repo has deliberately trimmed verbose comments. Write the comment, then cut it.
-- `doc.go` and `README.md` describe the public API in prose; update them when behavior changes.
-- `CHANGELOG.md` tracks the unreleased version; record breaking changes there (with a migration note for renames/removals).
+
+
