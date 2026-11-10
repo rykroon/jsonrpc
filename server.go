@@ -30,6 +30,7 @@ type Middleware func(next RawHandler) RawHandler
 // anything else is unclassified. req is nil when nothing could be decoded,
 // and may be partial after a failed decode. For a notification the result is
 // discarded, but the handler still runs so the failure can be logged.
+// Changes to req do not reach the response.
 type ErrorHandler func(ctx context.Context, req *Request, err error) *Error
 
 // DefaultErrorHandler sends an *Error verbatim and reports anything else as an
@@ -154,11 +155,13 @@ func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middlew
 // Serve dispatches one request. A notification runs but returns nil. Handler
 // panics are not recovered.
 func (s *Server) Serve(ctx context.Context, req *Request) *Response {
+	// Read once, so an ErrorHandler that modifies req cannot change the reply's id.
+	id := req.ID
 	if req.JSONRPC != Version {
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`)), req.ID)
+		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`)), id)
 	}
 	if req.Method == "" {
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, "missing method")), req.ID)
+		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, "missing method")), id)
 	}
 
 	s.mu.RLock()
@@ -169,7 +172,7 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		if req.IsNotification() {
 			return nil
 		}
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method)), req.ID)
+		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method)), id)
 	}
 
 	result, err := h(ctx, req.Params)
@@ -181,10 +184,10 @@ func (s *Server) Serve(ctx context.Context, req *Request) *Response {
 		return nil
 	}
 	if err != nil {
-		return NewErrorResponse(s.handleError(ctx, req, err), req.ID)
+		return NewErrorResponse(s.handleError(ctx, req, err), id)
 	}
 	// A nil result becomes JSON null; the spec requires the member.
-	return NewSuccessResponse(result, req.ID)
+	return NewSuccessResponse(result, id)
 }
 
 // ServeMessage parses one JSON-RPC message, dispatches it, and returns the
@@ -198,9 +201,10 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	}
 	var req Request
 	if err := s.decode(data, &req); err != nil {
+		id := req.ID
 		e := s.handleError(ctx, &req, classifyDecodeError(err))
 		// An id read before the failure lets the client correlate.
-		return s.marshalMessageError(e, req.ID)
+		return s.marshalMessageError(e, id)
 	}
 	resp := s.Serve(ctx, &req)
 	if resp == nil {
@@ -225,8 +229,9 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	for _, elem := range elems {
 		var req Request
 		if err := s.decode(elem, &req); err != nil {
+			id := req.ID
 			e := s.handleError(ctx, &req, classifyDecodeError(err))
-			responses = append(responses, NewErrorResponse(e, req.ID))
+			responses = append(responses, NewErrorResponse(e, id))
 			continue
 		}
 		if resp := s.Serve(ctx, &req); resp != nil {

@@ -1751,6 +1751,44 @@ func TestSetErrorHandlerSanitizesUnclassifiedErrors(t *testing.T) {
 	require.EqualError(t, logged, "dial postgres://user:hunter2@db: refused")
 }
 
+func TestErrorHandlerCannotChangeResponseID(t *testing.T) {
+	s := NewServer()
+	s.SetErrorHandler(func(_ context.Context, req *Request, err error) *Error {
+		if req != nil {
+			req.ID = StringID("hijacked")
+		}
+		return DefaultErrorHandler(context.Background(), req, err)
+	})
+	s.Register("boom", func(context.Context, struct{}) (any, error) {
+		return nil, errors.New("boom")
+	})
+	ctx := context.Background()
+
+	t.Run("Serve", func(t *testing.T) {
+		resp := s.Serve(ctx, NewRequest("boom", Params{}, IntID(1)))
+		require.Equal(t, IntID(1), resp.ID)
+		resp = s.Serve(ctx, NewRequest("missing", Params{}, IntID(2)))
+		require.Equal(t, IntID(2), resp.ID)
+	})
+
+	t.Run("decode failure", func(t *testing.T) {
+		out, err := s.ServeMessage(ctx, jsontext.Value(`{"jsonrpc":"2.0","id":3,"method":"boom","extra":1}`))
+		require.NoError(t, err)
+		var resp Response
+		require.NoError(t, json.Unmarshal(out, &resp))
+		require.Equal(t, IntID(3), resp.ID)
+	})
+
+	t.Run("batch decode failure", func(t *testing.T) {
+		out, err := s.ServeMessage(ctx, jsontext.Value(`[{"jsonrpc":"2.0","id":4,"method":"boom","extra":1}]`))
+		require.NoError(t, err)
+		resps, err := DecodeResponses(out)
+		require.NoError(t, err)
+		require.Len(t, resps, 1)
+		require.Equal(t, IntID(4), resps[0].ID)
+	})
+}
+
 func TestErrorHandlerSeesClassifiedErrors(t *testing.T) {
 	// An *Error a component raised still reaches the handler, so a verbose
 	// json/v2 message can be replaced.

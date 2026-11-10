@@ -66,6 +66,12 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   `Map` and `Slice` (members left undecoded, so numbers are not rounded), and
   its own `MarshalJSONTo` / `UnmarshalJSONFrom`.
 
+### Fixed
+
+- **An `ErrorHandler` can no longer change a response's id.** `Serve` and
+  `ServeMessage` read the request id before calling it, so modifying `req`
+  does not reach the reply.
+
 ## [v0.5.0] — 2026-09-08
 
 A breaking release. The API is now typed-first, every failure routes through
