@@ -360,3 +360,16 @@ func TestClientSetOptionsPanicsAfterUse(t *testing.T) {
 		require.NotPanics(t, func() { c.SetOptions(tempOptions) })
 	})
 }
+
+func TestClientRefusesEmptyMethod(t *testing.T) {
+	sent := false
+	c := NewClient(SenderFunc(func(context.Context, Request) (Response, error) {
+		sent = true
+		return Response{}, nil
+	}))
+	id, err := c.Call(context.Background(), "", nil, nil)
+	require.Error(t, err)
+	require.True(t, id.IsZero())
+	require.Error(t, c.Notify(context.Background(), "", nil))
+	require.False(t, sent)
+}

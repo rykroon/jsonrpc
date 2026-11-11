@@ -101,6 +101,12 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 - **A request whose id is not a string, number, or null fails to decode** as
   Invalid Request, rather than decoding and being rejected by `Serve`. The
   response is the same: Invalid Request with a null id.
+- **An empty method is refused before it is sent.** `Client.Call` and
+  `Notify` return an error, and marshaling a `Request` with an empty method,
+  the zero `Request` included, fails. A `Request` always marshals with
+  `"jsonrpc":"2.0"`.
+- **An error object must have `code` and `message` to decode.** `"error":{}`
+  in a response is now a decode error rather than an `Error` with code 0.
 - `Client.Call` and `Notify` no longer double-prefix a params error: it reads
   `jsonrpc: params must be…` rather than `jsonrpc: marshal params: jsonrpc:
   params must be…`.
@@ -113,6 +119,10 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 
 ### Added
 
+- **`ErrParse`, `ErrInvalidRequest`, `ErrMethodNotFound`, `ErrInvalidParams`,
+  and `ErrInternal`** — the spec's predefined errors as values. `errors.Is`
+  matches by code, so `errors.Is(err, jsonrpc.ErrMethodNotFound)` holds for
+  any `Error` with that code, including one returned by `Client.Call`.
 - **`Client.SetIDGenerator(func() ID)`** — replaces the default counter as the
   source of `Call`'s ids. `Call` refuses a zero, null, or fractional id from
   it without sending. Must be called before the first `Call` or `Notify`; nil

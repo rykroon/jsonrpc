@@ -51,15 +51,20 @@ var (
 	_ json.UnmarshalerFrom = (*Request)(nil)
 )
 
-// MarshalJSONTo writes the request, omitting zero params and id.
+// MarshalJSONTo writes the request, omitting zero params and id. The version
+// written is always Version. A request with an empty method, the zero Request
+// included, is an error: no server would accept it.
 func (req Request) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if req.method == "" {
+		return errors.New("jsonrpc: cannot marshal a request with an empty method")
+	}
 	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
 		return err
 	}
 	if err := enc.WriteToken(jsontext.String("jsonrpc")); err != nil {
 		return err
 	}
-	if err := enc.WriteToken(jsontext.String(req.JSONRPC())); err != nil {
+	if err := enc.WriteToken(jsontext.String(Version)); err != nil {
 		return err
 	}
 	if err := enc.WriteToken(jsontext.String("method")); err != nil {

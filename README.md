@@ -132,6 +132,16 @@ s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) json
 The default sends `Error` values through untouched and reports anything else
 as an Internal error carrying the error's message.
 
+The spec's predefined errors are available as `ErrParse`, `ErrInvalidRequest`,
+`ErrMethodNotFound`, `ErrInvalidParams`, and `ErrInternal`. `errors.Is` matches
+an `Error` by code, so a caller can test what came back from `Client.Call`:
+
+```go
+if _, err := c.Call(ctx, "add", params, &sum); errors.Is(err, jsonrpc.ErrMethodNotFound) {
+    // the server has no such method
+}
+```
+
 ## What it gives you
 
 - `Server` — a method registry. `Register` installs a `Handler`

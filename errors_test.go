@@ -113,3 +113,23 @@ func TestErrorDataDoesNotAlias(t *testing.T) {
 	e.Data()[0] = 'x'
 	require.Equal(t, `[1]`, string(e.Data()))
 }
+
+func TestSentinelsMatchByCode(t *testing.T) {
+	s := NewServer()
+	c := NewClient(s.Sender())
+	_, err := c.Call(context.Background(), "missing", nil, nil)
+	require.ErrorIs(t, err, ErrMethodNotFound)
+	require.NotErrorIs(t, err, ErrInvalidParams)
+}
+
+func TestErrorDecodeRequiresCodeAndMessage(t *testing.T) {
+	for _, in := range []string{`{}`, `{"code":1}`, `{"message":"m"}`} {
+		var e Error
+		require.Error(t, json.Unmarshal([]byte(in), &e), in)
+	}
+	var e Error
+	require.NoError(t, json.Unmarshal([]byte(`{"code":1,"message":""}`), &e))
+
+	var resp Response
+	require.Error(t, json.Unmarshal([]byte(`{"jsonrpc":"2.0","error":{},"id":1}`), &resp))
+}

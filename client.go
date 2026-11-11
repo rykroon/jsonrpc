@@ -97,6 +97,10 @@ func (c *Client) config() (json.Options, func() ID) {
 	return c.opts, c.idGen
 }
 
+// errEmptyMethod is what Call and Notify return rather than send a request
+// every server must reject.
+var errEmptyMethod = errors.New("jsonrpc: method must not be empty")
+
 // newID returns the next id from gen, checking it is one a client may send.
 func newID(gen func() ID) (ID, error) {
 	id := gen()
@@ -110,7 +114,8 @@ func newID(gen func() ID) (ID, error) {
 }
 
 // Call invokes method with params (marshaled by NewParams) and decodes the
-// reply into result; a nil result skips decoding. It returns the request's id,
+// reply into result; a nil result skips decoding. An empty method is an error
+// and nothing is sent. It returns the request's id,
 // which comes from the generator installed by SetIDGenerator or else an
 // internal counter; a response carrying a different id is an error. The id is
 // returned whenever the request was sent, even with an error, and is zero if
@@ -118,6 +123,9 @@ func newID(gen func() ID) (ID, error) {
 // error is a transport or decode failure.
 func (c *Client) Call(ctx context.Context, method string, params any, result any) (ID, error) {
 	opts, gen := c.config()
+	if method == "" {
+		return ID{}, errEmptyMethod
+	}
 	p, err := NewParams(params, opts)
 	if err != nil {
 		return ID{}, err
@@ -146,9 +154,13 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 }
 
 // Notify sends a notification: the server dispatches method but produces no
-// response. The error reports transport failures only.
+// response. The error reports an empty method, params that cannot be
+// marshaled, or a transport failure.
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
 	opts, _ := c.config()
+	if method == "" {
+		return errEmptyMethod
+	}
 	p, err := NewParams(params, opts)
 	if err != nil {
 		return err

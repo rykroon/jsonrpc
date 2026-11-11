@@ -21,6 +21,17 @@ const (
 	CodeServerErrorMin = -32099 // last (lowest) server-defined code
 )
 
+// The spec's predefined errors, with its messages. Error.Is compares codes, so
+// errors.Is(err, ErrMethodNotFound) matches any Error carrying that code,
+// whatever its message or data.
+var (
+	ErrParse          = NewError(CodeParseError, "Parse error")
+	ErrInvalidRequest = NewError(CodeInvalidRequest, "Invalid Request")
+	ErrMethodNotFound = NewError(CodeMethodNotFound, "Method not found")
+	ErrInvalidParams  = NewError(CodeInvalidParams, "Invalid params")
+	ErrInternal       = NewError(CodeInternalError, "Internal error")
+)
+
 // Error is the JSON-RPC error object. It is immutable: build one with NewError
 // and WithData, and read it through its accessors. Its optional data is raw
 // JSON; Data returns a copy, so an Error never shares bytes with a caller.
@@ -63,8 +74,9 @@ func (e Error) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return enc.WriteToken(jsontext.EndObject)
 }
 
-// UnmarshalJSONFrom decodes one error object. Undefined members are skipped;
-// duplicates are rejected. A failed decode leaves the receiver zeroed.
+// UnmarshalJSONFrom decodes one error object, which must have a code and a
+// message. Undefined members are skipped; duplicates are rejected. A failed
+// decode leaves the receiver zeroed.
 func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	// json/v2 does not zero the destination.
 	*e = Error{}
@@ -79,6 +91,7 @@ func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 
 	// The receiver is replaced only once the object is read.
 	var out Error
+	var hasCode, hasMessage bool
 	for d.PeekKind() != jsontext.KindEndObject {
 		tok, err := d.ReadToken()
 		if err != nil {
@@ -90,10 +103,12 @@ func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			if err := json.UnmarshalDecode(d, &out.code); err != nil {
 				return err
 			}
+			hasCode = true
 		case "message":
 			if err := json.UnmarshalDecode(d, &out.message); err != nil {
 				return err
 			}
+			hasMessage = true
 		case "data":
 			val, err := d.ReadValue()
 			if err != nil {
@@ -111,6 +126,9 @@ func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	// Consume the closing brace.
 	if _, err := d.ReadToken(); err != nil {
 		return err
+	}
+	if !hasCode || !hasMessage {
+		return errors.New("jsonrpc: error must have a code and a message")
 	}
 	*e = out
 	return nil

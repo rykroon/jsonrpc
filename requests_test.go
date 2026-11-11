@@ -86,3 +86,10 @@ func TestRequestUnmarshalJSONFromKeepsMembersReadBeforeAFailure(t *testing.T) {
 	require.JSONEq(t, "1", req.ID().String())
 	require.Equal(t, "add", req.Method())
 }
+
+func TestRequestMarshalRefusesEmptyMethod(t *testing.T) {
+	_, err := json.Marshal(Request{})
+	require.Error(t, err)
+	_, err = json.Marshal(NewRequest("", Params{}, IntID(1)))
+	require.Error(t, err)
+}
