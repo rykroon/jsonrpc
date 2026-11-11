@@ -174,7 +174,7 @@ if _, err := c.Call(ctx, "add", params, &sum); errors.Is(err, jsonrpc.ErrMethodN
   a zero `ID` is a notification. `String` returns the JSON form, so `"1"` and
   `1` stay distinct.
 - `Request` — an immutable value read through `Method()`, `Params()`, and
-  `ID()`. It decodes itself with `UnmarshalJSONFrom`, so the strict envelope
+  `ID()`. It decodes itself with `UnmarshalJSONFrom`, so the envelope
   check applies to any `json.Unmarshal` into one, not only the ones a `Server`
   drives.
 - `Response` — an immutable value for both shapes the spec allows: exactly

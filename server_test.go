@@ -513,13 +513,13 @@ func TestDuplicateMemberNamesRejected(t *testing.T) {
 func TestEnvelopeStrictness(t *testing.T) {
 	s := newTestServer(t)
 
-	t.Run("unknown envelope member rejected", func(t *testing.T) {
+	t.Run("unknown envelope member tolerated", func(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(),
 			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1,"extra":true}`))
 		require.NoError(t, err)
 		resp := decodeResponse(t, out)
-		require.True(t, resp.isError())
-		require.Equal(t, CodeInvalidRequest, resp.error.Code())
+		require.False(t, resp.isError())
+		require.JSONEq(t, `{"sum":3}`, string(resp.result))
 	})
 
 	t.Run("unknown member inside params tolerated", func(t *testing.T) {
@@ -558,7 +558,6 @@ func TestDefaultDecoderRejections(t *testing.T) {
 		{"null at top level", `null`, CodeInvalidRequest, "request must be a JSON object"},
 		{"non-string jsonrpc", `{"jsonrpc":2,"method":"add","id":1}`, CodeInvalidRequest, "jsonrpc must be a string"},
 		{"non-string method", `{"jsonrpc":"2.0","method":5,"id":1}`, CodeInvalidRequest, "method must be a string"},
-		{"unknown member", `{"jsonrpc":"2.0","method":"add","extra":true,"id":1}`, CodeInvalidRequest, "unknown member: extra"},
 		{"scalar params", `{"jsonrpc":"2.0","method":"add","params":5,"id":1}`, CodeInvalidRequest, "params must be an object or array"},
 		{"string params", `{"jsonrpc":"2.0","method":"add","params":"ping","id":1}`, CodeInvalidRequest, "params must be an object or array"},
 		{"bool params", `{"jsonrpc":"2.0","method":"add","params":true,"id":1}`, CodeInvalidRequest, "params must be an object or array"},
@@ -771,7 +770,7 @@ func TestSetOptionsAppliesToParamsAndBatch(t *testing.T) {
 		// The envelope is token-walked, so member matching there is exact.
 		code, msg, _ := decodeError(t, s, `{"jsonrpc":"2.0","Method":"add","id":1}`)
 		require.Equal(t, CodeInvalidRequest, code)
-		require.Equal(t, "unknown member: Method", msg)
+		require.Equal(t, "missing method", msg)
 	})
 
 	t.Run("batch split still isolates a duplicate to its element", func(t *testing.T) {
@@ -940,7 +939,7 @@ func TestErrorHandlerCoversDecodePath(t *testing.T) {
 
 		// id precedes the offending member, so the decoder had read it before
 		// it failed and the handler sees it.
-		code, msg, _ := decodeError(t, s, `{"jsonrpc":"2.0","id":1,"method":"add","surprise":true}`)
+		code, msg, _ := decodeError(t, s, `{"jsonrpc":"2.0","id":1,"method":"add","params":5}`)
 		require.Equal(t, CodeServerError, code)
 		require.Equal(t, "rejected", msg)
 		require.Equal(t, "add", got.Method())

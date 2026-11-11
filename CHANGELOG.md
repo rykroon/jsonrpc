@@ -101,10 +101,14 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 - **A request whose id is not a string, number, or null fails to decode** as
   Invalid Request, rather than decoding and being rejected by `Serve`. The
   response is the same: Invalid Request with a null id.
-- **An empty method is refused before it is sent.** `Client.Call` and
-  `Notify` return an error, and marshaling a `Request` with an empty method,
-  the zero `Request` included, fails. A `Request` always marshals with
-  `"jsonrpc":"2.0"`.
+- **`Client.Call` and `Notify` refuse an empty method** with an error, without
+  sending. Marshaling stays lenient: a `Request` built by hand with an empty
+  method still marshals.
+- **A `Request` always marshals with `"jsonrpc":"2.0"`**, the zero `Request`
+  included.
+- **Unknown envelope members in a request are ignored**, as they already were
+  in a response, rather than rejected as Invalid Request. The spec does not
+  forbid them. Duplicate member names are still Invalid Request.
 - **An error object must have `code` and `message` to decode.** `"error":{}`
   in a response is now a decode error rather than an `Error` with code 0.
 - `Client.Call` and `Notify` no longer double-prefix a params error: it reads

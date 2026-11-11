@@ -28,9 +28,9 @@
 // MarshalJSONTo, so every json.Unmarshal or json.Marshal of them, under v1 or
 // v2, gets the spec's checks.
 //
-// The request decode is strict: duplicate member names anywhere and unknown
-// envelope members are Invalid Request (unknown members inside params are
-// tolerated). Per the spec params must be structured when present, so P is a
+// The decode enforces what the spec requires and no more: duplicate member
+// names anywhere are Invalid Request, while members the spec does not define
+// are ignored, in the envelope and inside params alike. Per the spec params must be structured when present, so P is a
 // struct or slice, never a scalar, and "params":null is rejected; a request
 // with no parameters omits the member, as NewParams(nil) does. NewParams holds
 // the sending side to the same rule, so a request the far end would reject is

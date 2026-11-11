@@ -52,12 +52,8 @@ var (
 )
 
 // MarshalJSONTo writes the request, omitting zero params and id. The version
-// written is always Version. A request with an empty method, the zero Request
-// included, is an error: no server would accept it.
+// written is always Version.
 func (req Request) MarshalJSONTo(enc *jsontext.Encoder) error {
-	if req.method == "" {
-		return errors.New("jsonrpc: cannot marshal a request with an empty method")
-	}
 	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
 		return err
 	}
@@ -93,10 +89,10 @@ func (req Request) MarshalJSONTo(enc *jsontext.Encoder) error {
 }
 
 // UnmarshalJSONFrom decodes one request object token by token, so every
-// rejection carries this package's message: an unknown envelope member, a
-// non-string method, non-structured params (null included), an id that is not
-// a string, number, or null, or a duplicate member name anywhere is Invalid
-// Request; malformed input is a Parse error.
+// rejection carries this package's message: a non-string method,
+// non-structured params (null included), an id that is not a string, number,
+// or null, or a duplicate member name anywhere is Invalid Request; malformed
+// input is a Parse error. Members the spec does not define are skipped.
 // Params content is not otherwise validated. A missing method or wrong
 // version is Serve's verdict, so an id read before the failure survives.
 //
@@ -118,7 +114,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			return tokenError(err)
 		}
 		// Token.String allocates; the Token itself dies at the next read.
-		switch name := tok.String(); name {
+		switch tok.String() {
 		case "jsonrpc":
 			tok, err := d.ReadToken()
 			if err != nil {
@@ -164,7 +160,10 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			req.id = id
 
 		default:
-			return NewError(CodeInvalidRequest, "unknown member: "+name)
+			// The spec does not forbid extra members, so they are ignored.
+			if err := d.SkipValue(); err != nil {
+				return tokenError(err)
+			}
 		}
 	}
 

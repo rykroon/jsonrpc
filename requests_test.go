@@ -28,13 +28,13 @@ func TestRequestNotificationHasNoIDField(t *testing.T) {
 	require.True(t, req.IsNotification())
 }
 
-// The strict envelope check is Request's own wire form, so it applies to any
+// The envelope check is Request's own wire form, so it applies to any
 // unmarshal, not only the ones a Server drives.
 func TestRequestDecodesItself(t *testing.T) {
-	t.Run("plain json.Unmarshal is strict", func(t *testing.T) {
+	t.Run("plain json.Unmarshal checks the envelope", func(t *testing.T) {
 		var req Request
-		err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`), &req)
-		require.ErrorContains(t, err, "unknown member: surprise")
+		err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1,"method":"add","params":5}`), &req)
+		require.ErrorContains(t, err, "params must be an object or array")
 
 		e, ok := errors.AsType[Error](err)
 		require.True(t, ok, "the Error survives json/v2's wrapping")
@@ -59,8 +59,16 @@ func TestRequestDecodesItself(t *testing.T) {
 	// v1 is implemented over v2 in Go 1.27, so it honors the method too.
 	t.Run("under encoding/json v1", func(t *testing.T) {
 		var req Request
-		err := jsonv1.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"add","surprise":true,"id":1}`), &req)
-		require.ErrorContains(t, err, "unknown member: surprise")
+		err := jsonv1.Unmarshal([]byte(`{"jsonrpc":"2.0","method":"add","params":5,"id":1}`), &req)
+		require.ErrorContains(t, err, "params must be an object or array")
+	})
+
+	t.Run("members the spec does not define are skipped", func(t *testing.T) {
+		var req Request
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"jsonrpc":"2.0","meta":{"a":[1,{"b":2}]},"method":"add","surprise":true,"id":1}`), &req))
+		require.Equal(t, "add", req.Method())
+		require.Equal(t, IntID(1), req.ID())
 	})
 }
 
@@ -81,15 +89,15 @@ func TestRequestUnmarshalJSONFromReplacesPriorMembers(t *testing.T) {
 // The reset must not cost the server the id it attributes a decode failure to.
 func TestRequestUnmarshalJSONFromKeepsMembersReadBeforeAFailure(t *testing.T) {
 	var req Request
-	err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1,"method":"add","surprise":true}`), &req)
-	require.ErrorContains(t, err, "unknown member: surprise")
+	err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1,"method":"add","params":5}`), &req)
+	require.ErrorContains(t, err, "params must be an object or array")
 	require.JSONEq(t, "1", req.ID().String())
 	require.Equal(t, "add", req.Method())
 }
 
-func TestRequestMarshalRefusesEmptyMethod(t *testing.T) {
-	_, err := json.Marshal(Request{})
-	require.Error(t, err)
-	_, err = json.Marshal(NewRequest("", Params{}, IntID(1)))
-	require.Error(t, err)
+// Marshaling is lenient; Client.Call and Notify are what refuse an empty method.
+func TestRequestMarshalAlwaysWritesVersion(t *testing.T) {
+	out, err := json.Marshal(Request{})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"jsonrpc":"2.0","method":""}`, string(out))
 }
