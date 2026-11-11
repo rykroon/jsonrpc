@@ -6,7 +6,7 @@
 
 # JSON-RPC types
 
-The JSON-RPC types just represent data. They should be immutable in the right context. For example a client should not be able to alter the response it gets back from a server. And the server should not be able to alter the request is receives from the client.
+The JSON-RPC types just represent data and therfore should be implemented as value types (non-pointer types). They should be immutable in the correct context. For example a client should not be able to alter the response it gets back from a server. And the server should not be able to alter the request it receives from the client.
 
 The types should be written in a way so that an instance of a type can never express an invalid state as described in the JSONRPC specification. For example Params can only ever be a JSON object or array (or be empty). An ID can only ever be a string, number, or null (or empty).
 
@@ -38,6 +38,3 @@ A server can register methods. Method handlers can be in the form of a "Typed" H
 
 A RawHandler passes the Params and expects a jsontext.Value for the result.
 A typed Handler passes P any (The Params type) and expects T any (The Result type.)
-
-
-
