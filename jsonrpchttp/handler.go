@@ -1,11 +1,8 @@
 // Package jsonrpchttp provides HTTP adapters for the jsonrpc package: Handler
-// is an http.Handler wrapping a *jsonrpc.Server, and Sender implements
-// jsonrpc.Sender by POSTing requests to a URL.
-//
-// JSON-RPC errors — including parse errors — are returned in-band with HTTP
-// 200; notifications produce 204 No Content. Transports that need HTTP-level
-// parse failures should write their own handler calling
-// (*jsonrpc.Server).Serve directly.
+// serves a *jsonrpc.Server, and Sender POSTs requests to a URL. JSON-RPC
+// errors, parse errors included, are returned with HTTP 200; notifications
+// get 204 No Content. For HTTP-level parse failures, write a handler that
+// calls (*jsonrpc.Server).Serve.
 package jsonrpchttp
 
 import (

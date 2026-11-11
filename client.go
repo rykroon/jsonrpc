@@ -56,12 +56,9 @@ func counterIDs() func() ID {
 }
 
 // SetOptions installs json/v2 options for the params Call and Notify marshal
-// and the result Call decodes, mirroring Server.SetOptions on the other side
-// of the wire. Later calls replace earlier ones. Panics once Call or Notify
-// has run, so neither can silently miss options set after it.
-//
-// Send is unaffected: its Request is already built, and the envelope is the
-// Sender's to encode.
+// and the result Call decodes, mirroring Server.SetOptions. Later calls replace
+// earlier ones. Panics once Call or Notify has run. Send is unaffected, as its
+// Request is already built.
 func (c *Client) SetOptions(opts ...json.Options) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -113,14 +110,11 @@ func newID(gen func() ID) (ID, error) {
 	return id, nil
 }
 
-// Call invokes method with params (marshaled by NewParams) and decodes the
-// reply into result; a nil result skips decoding. An empty method is an error
-// and nothing is sent. It returns the request's id,
-// which comes from the generator installed by SetIDGenerator or else an
-// internal counter; a response carrying a different id is an error. The id is
-// returned whenever the request was sent, even with an error, and is zero if
-// it was not. Errors reported by the server are returned as Error; any other
-// error is a transport or decode failure.
+// Call sends method with params (marshaled by NewParams) and decodes the reply
+// into result, unless result is nil. It returns the id it sent, zero if nothing
+// was sent. An empty method or a response with a different id is an error.
+// Server-reported errors are returned as Error; others are transport or decode
+// failures.
 func (c *Client) Call(ctx context.Context, method string, params any, result any) (ID, error) {
 	opts, gen := c.config()
 	if method == "" {

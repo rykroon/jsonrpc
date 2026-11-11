@@ -12,27 +12,19 @@ import (
 // Handler is a typed method: decoded params P in, result R or an error out.
 type Handler[P, R any] func(context.Context, P) (R, error)
 
-// RawHandler is the dispatch contract: undecoded params (zero when absent) in,
-// result bytes or an error out. A nil result encodes as `"result":null`; a
-// result that is not valid JSON is reported as an error.
-//
-// Every error goes to the ErrorHandler. DefaultErrorHandler sends an Error
-// as-is, found through any %w wrapping, and reports anything else as an
-// Internal error.
+// RawHandler takes undecoded params (zero when absent) and returns result
+// bytes or an error. A nil result is sent as null; a result that is not valid
+// JSON is an error. Every error goes to the ErrorHandler.
 type RawHandler func(ctx context.Context, params Params) (jsontext.Value, error)
 
 // Middleware wraps a RawHandler. mw[0] is outermost.
 type Middleware func(next RawHandler) RawHandler
 
-// ErrorHandler turns every error the server reports — a failed decode, a
-// handler's error, a protocol failure Serve detects — into the Error sent
-// back.
-//
-// err is often already an Error (Invalid params, Parse, Invalid Request);
-// anything else is unclassified. req is the zero Request when nothing could
-// be decoded, and may be partial after a failed decode. For a notification the
-// result is discarded, but the handler still runs so the failure can be
-// logged.
+// ErrorHandler turns every error the server reports, from decoding, a handler,
+// or Serve itself, into the Error sent back. err may already be an Error. req
+// is zero when nothing could be decoded and may be partial after a failed
+// decode. It also runs for notifications, whose result is discarded, so the
+// failure can be logged.
 type ErrorHandler func(ctx context.Context, req Request, err error) Error
 
 // DefaultErrorHandler sends an Error verbatim and reports anything else as an
@@ -82,12 +74,9 @@ func (s *Server) Use(mw ...Middleware) {
 	s.middleware = append(s.middleware, mw...)
 }
 
-// SetOptions installs json/v2 options for the payload: params into P and R
-// into the result. Later calls replace earlier ones. Panics once any method is
-// registered; for one method use Raw(fn, opts) with RegisterRaw.
-//
-// The options never reach the envelope, whose wire form the spec fixes, so a
-// marshaler for Response or an unmarshaler for Request has no effect there.
+// SetOptions installs json/v2 options for params into P and R into the result,
+// never the envelope. Later calls replace earlier ones. Panics once any method
+// is registered; for one method use Raw(fn, opts) with RegisterRaw.
 func (s *Server) SetOptions(opts ...json.Options) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

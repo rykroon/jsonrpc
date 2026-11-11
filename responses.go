@@ -7,21 +7,16 @@ import (
 	"fmt"
 )
 
-// Response is a JSON-RPC 2.0 response: exactly one of result and error is
-// set, and the id is always present, JSON null when the request id could not
-// be read. It is immutable; build one with NewSuccessResponse or
-// NewErrorResponse. The zero Response stands for no response, as Serve
-// returns for a notification. MarshalJSONTo and UnmarshalJSONFrom walk the
-// object themselves, so a shape the spec forbids never crosses the wire.
-//
-// A success response always holds a non-empty result (JSON null at the
-// least), so an empty result on a non-zero Response marks an error response
-// and error is read only then.
+// Response is an immutable JSON-RPC 2.0 response: exactly one of result and
+// error is set, and the id is always present (null if the request's could not
+// be read). Build one with NewSuccessResponse or NewErrorResponse. The zero
+// Response means no response, as Serve returns for a notification.
 type Response struct {
 	jsonrpc string
-	result  jsontext.Value
-	error   Error
-	id      ID
+	// Never empty on a success response, so an empty result marks an error.
+	result jsontext.Value
+	error  Error
+	id     ID
 }
 
 func (r Response) JSONRPC() string { return r.jsonrpc }

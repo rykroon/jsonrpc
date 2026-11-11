@@ -6,12 +6,10 @@ import (
 	"encoding/json/v2"
 )
 
-// Raw adapts a Handler into a RawHandler: params into P, fn, result out. opts
-// apply to both sides; Server.Register passes the server's. Absent params
-// yield the zero P without consulting any unmarshaler; params that do not fit
-// P are Invalid params. Every other error passes through untouched, as does a
-// failed result marshal. Install the result with Server.RegisterRaw to give
-// one method its own options.
+// Raw adapts a Handler into a RawHandler, decoding params into P and encoding
+// R under opts. Absent params give the zero P; params that do not fit P are
+// Invalid params. Other errors pass through. Use it with Server.RegisterRaw to
+// give one method its own options.
 func Raw[P, R any](fn Handler[P, R], opts ...json.Options) RawHandler {
 	return func(ctx context.Context, params Params) (jsontext.Value, error) {
 		var p P

@@ -88,16 +88,13 @@ func (req Request) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return enc.WriteToken(jsontext.EndObject)
 }
 
-// UnmarshalJSONFrom decodes one request object token by token, so every
-// rejection carries this package's message: a non-string method,
-// non-structured params (null included), an id that is not a string, number,
-// or null, or a duplicate member name anywhere is Invalid Request; malformed
-// input is a Parse error. Members the spec does not define are skipped.
-// Params content is not otherwise validated. A missing method or wrong
-// version is Serve's verdict, so an id read before the failure survives.
-//
-// The receiver is reset first because json/v2 does not zero the destination.
+// UnmarshalJSONFrom decodes one request object. A non-string method, params
+// that are not an object or array, an id that is not a string, number, or
+// null, or a duplicate member name is Invalid Request; malformed input is a
+// Parse error. Unknown members are skipped. A missing method or wrong version
+// is left to Serve, so an id read before a failure survives.
 func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
+	// json/v2 does not zero the destination.
 	*req = Request{}
 
 	tok, err := d.ReadToken()
