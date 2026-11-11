@@ -62,14 +62,14 @@
 //
 // # Errors
 //
-// Handler and RawHandler return a plain error. An Error names the code,
-// message, and Data; anything else, wrapped or not, is left to the
-// ErrorHandler installed with Server.SetErrorHandler, which sees every failure
-// the server reports, notifications included.
+// Handler and RawHandler return a plain error. Every failure the server
+// reports, notifications included, goes to the ErrorHandler installed with
+// Server.SetErrorHandler, which decides the Error the client sees.
 //
-// DefaultErrorHandler sends an Error verbatim and reports anything else as an
-// Internal error carrying its message. A server that must not leak internals
-// installs its own:
+// DefaultErrorHandler sends an Error verbatim, so returning one names the
+// code, message, and Data yourself, and reports anything else, wrapped or
+// not, as an Internal error carrying its message. A server that must not leak
+// internals installs its own:
 //
 //	s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) jsonrpc.Error {
 //		if e, ok := errors.AsType[jsonrpc.Error](err); ok {

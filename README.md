@@ -6,6 +6,9 @@ A small, transport-agnostic JSON-RPC 2.0 toolkit for Go.
 go get github.com/rykroon/jsonrpc
 ```
 
+Requires Go 1.27 or later: the package uses `encoding/json/v2` and generic
+methods.
+
 ## Quick start
 
 ```go
@@ -110,9 +113,11 @@ outside it — the `Request` is already built, and the envelope is the
 
 ## Errors
 
-Everything that can fail returns a plain `error`. Returning a `*jsonrpc.Error`
-says you classified the failure yourself; anything else leaves that to the
-server, so handlers and middleware can wrap freely with `%w`:
+Everything that can fail returns a plain `error`, and every error a handler
+or middleware returns goes to the server's `ErrorHandler`. Returning a
+`jsonrpc.Error` says you classified the failure yourself; anything else leaves
+that to the `ErrorHandler`, so handlers and middleware can wrap freely with
+`%w`:
 
 ```go
 s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) jsonrpc.Error {
@@ -137,8 +142,9 @@ as an Internal error carrying the error's message.
 - `Client.Call` / `Client.Notify` — one-line method calls with params
   marshaling, id generation, and result decoding; server errors come back
   as `Error`. `Call` returns the id it sent, and `Client.SetIDGenerator`
-  replaces the default counter with your own id scheme. `Client.Send` is the low-level escape hatch, round-tripping
-  a `Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
+  replaces the default counter with your own id scheme. `Client.Send` is the
+  low-level escape hatch, round-tripping a `Request` through a `Sender`
+  (in-process, HTTP, WebSocket, etc.).
 - `Server.SetErrorHandler` — one place to decide what every failure looks
   like on the wire: sanitize messages, remap codes, attach `Data`, log the
   cause. Also called for notification failures, which send no reply.
@@ -157,18 +163,19 @@ as an Internal error carrying the error's message.
   so ids compare with `==` and work as map keys. The constructors cannot fail;
   a zero `ID` is a notification. `String` returns the JSON form, so `"1"` and
   `1` stay distinct.
-- `Request` — a plain struct of `Params` and `ID`. It
-  decodes itself with `UnmarshalJSONFrom`, so the strict envelope check applies
-  to any `json.Unmarshal` into one, not only the ones a `Server` drives.
+- `Request` — an immutable value read through `Method()`, `Params()`, and
+  `ID()`. It decodes itself with `UnmarshalJSONFrom`, so the strict envelope
+  check applies to any `json.Unmarshal` into one, not only the ones a `Server`
+  drives.
 - `Response` — an immutable value for both shapes the spec allows: exactly
   one of `Result()` and `Error()` is set, and `ID()` is always present.
   `e, ok := resp.Error()` tells the two apart, and `DecodeResult` unmarshals a
   successful result into a target. The zero `Response` means no response
-  (`Serve` and `Sender` return it for a notification); check `IsZero()`. `NewSuccessResponse` / `NewErrorResponse` normalize an empty result
-  or id to JSON null, and it writes itself in canonical form with
-  `MarshalJSONTo` and reads itself with `UnmarshalJSONFrom`, so any
-  `json.Unmarshal` into one checks the spec's invariants — what a `Sender`
-  implementation reaches for.
+  (`Serve` and `Sender` return it for a notification); check `IsZero()`.
+  `NewSuccessResponse` / `NewErrorResponse` normalize an empty result or id to
+  JSON null, and it writes itself in canonical form with `MarshalJSONTo` and
+  reads itself with `UnmarshalJSONFrom`, so any `json.Unmarshal` into one
+  checks the spec's invariants — what a `Sender` implementation reaches for.
 - `DecodeResponses` — parse a batch reply off the wire, applying those same
   checks element by element.
 - `Server.ServeMessage` — byte-level entry point for transports that

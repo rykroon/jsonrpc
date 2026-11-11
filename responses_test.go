@@ -199,3 +199,10 @@ func TestResponseResultDoesNotAlias(t *testing.T) {
 	resp.Result()[0] = 'x'
 	require.Equal(t, `[1]`, string(resp.Result()))
 }
+
+func TestNewSuccessResponseCopiesResult(t *testing.T) {
+	b := jsontext.Value(`[1]`)
+	resp := NewSuccessResponse(b, IntID(1))
+	b[1] = '9'
+	require.Equal(t, `[1]`, string(resp.Result()))
+}

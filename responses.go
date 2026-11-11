@@ -50,10 +50,14 @@ var (
 	_ json.UnmarshalerFrom = (*Response)(nil)
 )
 
-// NewSuccessResponse builds a Response; an empty result or zero id becomes null.
+// NewSuccessResponse builds a Response; an empty result or zero id becomes
+// null. The result is copied, so later changes to the caller's bytes do not
+// reach the Response.
 func NewSuccessResponse(result jsontext.Value, id ID) Response {
 	if len(result) == 0 {
 		result = jsontext.Value("null")
+	} else {
+		result = result.Clone()
 	}
 	if id.IsZero() {
 		id = nullID()

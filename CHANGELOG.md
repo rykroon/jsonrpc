@@ -104,7 +104,6 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 - `Client.Call` and `Notify` no longer double-prefix a params error: it reads
   `jsonrpc: params must be…` rather than `jsonrpc: marshal params: jsonrpc:
   params must be…`.
-
 - **`Server.SetOptions` is payload-only.** The options govern params into
   `P` and `R` into the result, and no longer reach the envelope: an
   unmarshaler for `Request` or a marshaler for `Response` or `Error` is
@@ -131,6 +130,12 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 
 ### Fixed
 
+- **A handler result that is not valid JSON is reported as an error.** `Serve`
+  sends it to the `ErrorHandler`, an Internal error by default, instead of
+  building a response that cannot be marshaled, which left `ServeMessage`
+  callers and HTTP clients with no JSON-RPC reply.
+- **`NewSuccessResponse` copies the result**, so changing the caller's bytes
+  afterwards no longer changes the `Response`.
 - **An `ErrorHandler` can no longer change a response's id.** `Serve` and
   `ServeMessage` read the request id before calling it, so modifying `req`
   does not reach the reply.
@@ -166,10 +171,6 @@ Removed, with no replacement needed:
 
 ### Changed
 
-- **`Request` is a value type with unexported fields.** It is passed by value
-  everywhere and read through accessors, so it is never nil and an
-  `ErrorHandler` cannot alter it. Build one with `NewRequest` or
-  `NewNotification`; an `ErrorHandler` given no request sees the zero value.
 - **`RawHandler` returns `error`, not `*Error`.** No public signature other
   than `Error`'s own methods traffics in `*Error` any more. Returning an `*Error`
   means "I classified this"; anything else, wrapped with `%w` or not, is left

@@ -1013,3 +1013,20 @@ func TestSetErrorHandlerPanics(t *testing.T) {
 		})
 	})
 }
+
+func TestServeRejectsInvalidResult(t *testing.T) {
+	s := NewServer()
+	s.RegisterRaw("bad", func(context.Context, Params) (jsontext.Value, error) {
+		return jsontext.Value(`{"a":`), nil
+	})
+
+	out, err := s.ServeMessage(context.Background(), jsontext.Value(`{"jsonrpc":"2.0","method":"bad","id":1}`))
+	require.NoError(t, err)
+
+	var resp Response
+	require.NoError(t, json.Unmarshal(out, &resp))
+	require.Equal(t, IntID(1), resp.ID())
+	e, ok := resp.Error()
+	require.True(t, ok)
+	require.Equal(t, CodeInternalError, e.Code())
+}

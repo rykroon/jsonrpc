@@ -13,10 +13,12 @@ import (
 type Handler[P, R any] func(context.Context, P) (R, error)
 
 // RawHandler is the dispatch contract: undecoded params (zero when absent) in,
-// result bytes or an error out. A nil result encodes as `"result":null`.
+// result bytes or an error out. A nil result encodes as `"result":null`; a
+// result that is not valid JSON is reported as an error.
 //
-// An Error is sent as-is; any other error goes to the ErrorHandler, so
-// wrapping with %w is fine.
+// Every error goes to the ErrorHandler. DefaultErrorHandler sends an Error
+// as-is, found through any %w wrapping, and reports anything else as an
+// Internal error.
 type RawHandler func(ctx context.Context, params Params) (jsontext.Value, error)
 
 // Middleware wraps a RawHandler. mw[0] is outermost.
@@ -27,10 +29,10 @@ type Middleware func(next RawHandler) RawHandler
 // back.
 //
 // err is often already an Error (Invalid params, Parse, Invalid Request);
-// anything else is unclassified. req is nil when nothing could be decoded,
-// and may be partial after a failed decode. For a notification the result is
-// discarded, but the handler still runs so the failure can be logged.
-// Changes to req do not reach the response.
+// anything else is unclassified. req is the zero Request when nothing could
+// be decoded, and may be partial after a failed decode. For a notification the
+// result is discarded, but the handler still runs so the failure can be
+// logged.
 type ErrorHandler func(ctx context.Context, req Request, err error) Error
 
 // DefaultErrorHandler sends an Error verbatim and reports anything else as an
@@ -148,7 +150,6 @@ func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middlew
 // Serve dispatches one request. A notification runs but returns the zero
 // Response. Handler panics are not recovered.
 func (s *Server) Serve(ctx context.Context, req Request) Response {
-	// Read once, so an ErrorHandler that modifies req cannot change the reply's id.
 	id := req.ID()
 	if req.JSONRPC() != Version {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`)), id)
@@ -169,6 +170,11 @@ func (s *Server) Serve(ctx context.Context, req Request) Response {
 	}
 
 	result, err := h(ctx, req.Params())
+	// A result that is not JSON could not be marshaled into a response, so it
+	// is the handler's failure, reported like any other.
+	if err == nil && len(result) > 0 && !result.IsValid() {
+		err = fmt.Errorf("jsonrpc: method %q returned a result that is not valid JSON", req.Method())
+	}
 	if req.IsNotification() {
 		// No reply, but the ErrorHandler still runs so it can log.
 		if err != nil {
