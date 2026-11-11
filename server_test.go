@@ -652,219 +652,50 @@ func TestDecodeErrorEchoesRecoveredID(t *testing.T) {
 	})
 }
 
-// requestUnmarshaler installs fn as the *Request unmarshaler, which is how a
-// server takes over the envelope decode.
-func requestUnmarshaler(fn func(*jsontext.Decoder, *Request) error) json.Options {
-	return json.WithUnmarshalers(json.UnmarshalFromFunc(fn))
-}
-
-func TestRequestUnmarshalerErrorPassThrough(t *testing.T) {
-	custom := withData(NewError(-32050, "bad envelope"), map[string]string{"hint": "read the docs"})
-
-	t.Run("bespoke Error surfaces verbatim", func(t *testing.T) {
-		s := NewServer()
-		s.SetOptions(requestUnmarshaler(func(*jsontext.Decoder, *Request) error { return custom }))
-		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
-			return addResult{Sum: p.A + p.B}, nil
-		})
-
-		out, err := s.ServeMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"add","id":1}`))
-		require.NoError(t, err)
-		resp := decodeResponse(t, out)
-		// The server must not have rewritten any of it.
-		require.Equal(t, -32050, resp.error.Code())
-		require.Equal(t, "bad envelope", resp.error.Message())
-		var hint struct {
-			Hint string `json:"hint"`
-		}
-		require.NoError(t, resp.error.DecodeData(&hint))
-		require.Equal(t, "read the docs", hint.Hint)
+// The server's options are payload-only: an unmarshaler for Request or a
+// marshaler for Response or Error never reaches the envelope.
+func TestSetOptionsDoesNotReachTheEnvelope(t *testing.T) {
+	s := NewServer()
+	s.SetOptions(
+		json.WithUnmarshalers(json.UnmarshalFromFunc(func(*jsontext.Decoder, *Request) error {
+			return errors.New("request unmarshaler ran")
+		})),
+		json.WithMarshalers(json.JoinMarshalers(
+			json.MarshalToFunc(func(*jsontext.Encoder, Response) error {
+				return errors.New("response marshaler ran")
+			}),
+			json.MarshalToFunc(func(*jsontext.Encoder, Error) error {
+				return errors.New("error marshaler ran")
+			}),
+		)),
+	)
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
 	})
 
-	t.Run("wrapped Error is unwrapped", func(t *testing.T) {
-		s := NewServer()
-		s.SetOptions(requestUnmarshaler(func(*jsontext.Decoder, *Request) error {
-			return fmt.Errorf("decoding envelope: %w", custom)
-		}))
-
-		out, err := s.ServeMessage(context.Background(), []byte(`{}`))
-		require.NoError(t, err)
-		resp := decodeResponse(t, out)
-		require.Equal(t, -32050, resp.error.Code())
-		require.Equal(t, "bad envelope", resp.error.Message())
-	})
-
-	t.Run("plain error is classified as Invalid Request", func(t *testing.T) {
-		s := NewServer()
-		s.SetOptions(requestUnmarshaler(func(*jsontext.Decoder, *Request) error { return errors.New("nope") }))
-
-		code, message, _ := decodeError(t, s, `{}`)
-		require.Equal(t, CodeInvalidRequest, code)
-		require.Equal(t, "nope", message)
-	})
-}
-
-// A *Request unmarshaler replaces the decode, not the checks around it.
-func TestRequestUnmarshalerCannotBypassServer(t *testing.T) {
-	t.Run("Serve still owns the version verdict", func(t *testing.T) {
-		// Even an unmarshaler that accepts anything cannot smuggle a bad
-		// version past Serve, which validates every Request however it was
-		// built.
-		s := NewServer()
-		s.SetOptions(requestUnmarshaler(func(d *jsontext.Decoder, req *Request) error {
-			// Ignoring the message still means consuming its one value.
-			if err := d.SkipValue(); err != nil {
-				return err
-			}
-			req.jsonrpc, req.method, req.id = "1.0", "add", IntID(1)
-			return nil
-		}))
-		out, err := s.ServeMessage(context.Background(), []byte(`{}`))
-		require.NoError(t, err)
-		resp := decodeResponse(t, out)
-		require.Equal(t, CodeInvalidRequest, resp.error.Code())
-		require.JSONEq(t, "1", resp.id.String())
-	})
-
-	t.Run("json/v2 still owns the framing", func(t *testing.T) {
-		// An unmarshaler that never delegates to the default still cannot let
-		// trailing data through: nothing may follow the one value it consumed.
-		s := NewServer()
-		s.SetOptions(requestUnmarshaler(func(d *jsontext.Decoder, req *Request) error {
-			val, err := d.ReadValue()
-			if err != nil {
-				return err
-			}
-			return json.Unmarshal(val, req)
-		}))
-		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
-			return addResult{Sum: p.A + p.B}, nil
-		})
-
-		msg := `{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`
-		out, err := s.ServeMessage(context.Background(), []byte(msg))
-		require.NoError(t, err)
-		require.JSONEq(t, `{"sum":3}`, string(decodeResponse(t, out).result))
-
-		code, _, _ := decodeError(t, s, msg+" !")
-		require.Equal(t, CodeParseError, code)
-	})
-}
-
-// An unmarshaler or marshaler in the options outranks a method, so SetOptions
-// alone takes over either wire form.
-func TestSetOptionsOverridesTheTypesOwnForm(t *testing.T) {
-	t.Run("a *Request unmarshaler replaces the default", func(t *testing.T) {
-		s := NewServer()
-		// A decoder that tolerates the unknown member the default rejects.
-		s.SetOptions(json.WithUnmarshalers(json.UnmarshalFromFunc(
-			func(d *jsontext.Decoder, req *Request) error {
-				var raw struct {
-					Params Params `json:"params"`
-					ID     ID     `json:"id"`
-				}
-				if err := json.UnmarshalDecode(d, &raw); err != nil {
-					return err
-				}
-				req.jsonrpc, req.method = Version, "add"
-				req.params, req.id = raw.Params, raw.ID
-				return nil
-			},
-		)))
-		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
-			return addResult{Sum: p.A + p.B}, nil
-		})
-
+	t.Run("single", func(t *testing.T) {
 		out, err := s.ServeMessage(context.Background(),
-			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"surprise":true,"id":1}`))
+			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`))
 		require.NoError(t, err)
 		require.JSONEq(t, `{"jsonrpc":"2.0","result":{"sum":3},"id":1}`, string(out))
 	})
 
-	t.Run("a *Response marshaler replaces the default", func(t *testing.T) {
-		s := NewServer()
-		s.SetOptions(json.WithMarshalers(json.MarshalToFunc(stampEncoder)))
-		s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
-			return addResult{Sum: p.A + p.B}, nil
-		})
-
-		out, err := s.ServeMessage(context.Background(),
-			[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`))
-		require.NoError(t, err)
-		require.JSONEq(t, `{"jsonrpc":"2.0","result":{"sum":3},"id":1,"served_by":"test"}`, string(out))
-
-		out, err = s.ServeMessage(context.Background(), []byte(`[
+	t.Run("batch", func(t *testing.T) {
+		out, err := s.ServeMessage(context.Background(), []byte(`[
 			{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1},
 			{"jsonrpc":"2.0","method":"missing","id":2}
 		]`))
 		require.NoError(t, err)
 		require.JSONEq(t, `[
-			{"jsonrpc":"2.0","result":{"sum":3},"id":1,"served_by":"test"},
-			{"jsonrpc":"2.0","error":{"code":-32601,"message":"method not found: missing"},"id":2,"served_by":"test"}
-		]`, string(out), "batch")
-
-		out, err = s.ServeMessage(context.Background(), []byte(`{`))
-		require.NoError(t, err)
-		require.Contains(t, string(out), `"served_by":"test"`, "a message that never reaches Serve")
-	})
-}
-
-// stampEncoder writes the canonical members plus one the spec never defines.
-func stampEncoder(enc *jsontext.Encoder, resp *Response) error {
-	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
-		return err
-	}
-	if err := enc.WriteToken(jsontext.String("jsonrpc")); err != nil {
-		return err
-	}
-	if err := enc.WriteToken(jsontext.String(Version)); err != nil {
-		return err
-	}
-	if resp.isError() {
-		if err := enc.WriteToken(jsontext.String("error")); err != nil {
-			return err
-		}
-		if err := json.MarshalEncode(enc, resp.error); err != nil {
-			return err
-		}
-	} else {
-		if err := enc.WriteToken(jsontext.String("result")); err != nil {
-			return err
-		}
-		if err := enc.WriteValue(resp.result); err != nil {
-			return err
-		}
-	}
-	if err := enc.WriteToken(jsontext.String("id")); err != nil {
-		return err
-	}
-	if err := json.MarshalEncode(enc, resp.id); err != nil {
-		return err
-	}
-	if err := enc.WriteToken(jsontext.String("served_by")); err != nil {
-		return err
-	}
-	if err := enc.WriteToken(jsontext.String("test")); err != nil {
-		return err
-	}
-	return enc.WriteToken(jsontext.EndObject)
-}
-
-// A marshaler failure has no response left to report it in, so it surfaces as
-// ServeMessage's error return.
-func TestResponseMarshalerErrorSurfaces(t *testing.T) {
-	s := NewServer()
-	s.SetOptions(json.WithMarshalers(json.MarshalToFunc(func(*jsontext.Encoder, *Response) error {
-		return errors.New("marshaler failed")
-	})))
-	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
-		return addResult{Sum: p.A + p.B}, nil
+			{"jsonrpc":"2.0","result":{"sum":3},"id":1},
+			{"jsonrpc":"2.0","error":{"code":-32601,"message":"method not found: missing"},"id":2}
+		]`, string(out))
 	})
 
-	out, err := s.ServeMessage(context.Background(),
-		[]byte(`{"jsonrpc":"2.0","method":"add","params":{"a":1,"b":2},"id":1}`))
-	require.ErrorContains(t, err, "marshaler failed")
-	require.Nil(t, out)
+	t.Run("a message that never reaches Serve", func(t *testing.T) {
+		code, _, _ := decodeError(t, s, `{`)
+		require.Equal(t, CodeParseError, code)
+	})
 }
 
 func TestSetOptionsParamsUnmarshaler(t *testing.T) {

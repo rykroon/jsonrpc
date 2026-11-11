@@ -80,7 +80,7 @@ func (r Response) DecodeResult(into any, opts ...json.Options) error {
 
 // MarshalJSONTo writes the canonical object — Version, result or error, id —
 // and reports the zero Response, which holds neither member, instead of
-// sending it. A marshaler for *Response in a Server's options overrides this.
+// sending it.
 func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if len(r.result) == 0 && r.IsZero() {
 		return errors.New("jsonrpc: response has neither result nor error")

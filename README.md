@@ -88,6 +88,9 @@ s.Register("epoch", epoch) // any time.Time in epoch's result uses the marshaler
 
 `SetOptions` must be called before registering methods. To give one method
 its own options, adapt it yourself: `s.RegisterRaw("m", jsonrpc.Raw(fn, opts))`.
+The options cover the payload only; the JSON-RPC envelope always uses the
+package's own encoding. Error data takes options at construction:
+`NewError(code, msg).WithData(v, opts)`.
 
 `Client.SetOptions` is the mirror on the other side of the wire, covering the
 params `Call` and `Notify` marshal and the result `Call` decodes, so a client
@@ -140,9 +143,8 @@ as an Internal error carrying the error's message.
   cause. Also called for notification failures, which send no reply.
 - `Server.SetOptions` — install json/v2 options (e.g. `json.WithMarshalers`,
   `json.WithUnmarshalers`) that control how every method's params are
-  decoded and results encoded. The options are used as given, so an
-  unmarshaler for `*Request` or a marshaler for `*Response` takes over the
-  envelope itself. `Client.SetOptions` installs the same policy on the
+  decoded and results encoded. They never reach the envelope, whose wire
+  form the spec fixes. `Client.SetOptions` installs the same policy on the
   calling side.
 - `NewRequest` / `NewNotification` — construct requests from a `Params` and
   an `ID`.

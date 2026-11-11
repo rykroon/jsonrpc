@@ -41,21 +41,17 @@
 //
 // # Options
 //
-// Server.SetOptions installs one json.Options for all of the server's JSON
-// work: the envelope, params into P, R, and responses. json.WithUnmarshalers
-// and json.WithMarshalers give a method's types a wire form they do not
-// define themselves. Options are captured at registration, so SetOptions runs
-// before any Register; for one method use Raw(fn, opts) with RegisterRaw.
+// Server.SetOptions installs one json.Options for the payload: params into P
+// and R into the result. json.WithUnmarshalers and json.WithMarshalers give a
+// method's types a wire form they do not define themselves. Options are
+// captured at registration, so SetOptions runs before any Register; for one
+// method use Raw(fn, opts) with RegisterRaw.
 //
-// The options are used as given, and json/v2 consults them before a type's
-// methods, so an unmarshaler for *Request or a marshaler for *Response takes
-// over the envelope and can delegate to the type's own method. An Error from
-// such an unmarshaler is sent as-is; any other error is a Parse error or an
-// Invalid Request, and Serve still validates every Request it dispatches. A
-// marshaler's error has no response left to carry it, so it surfaces as
-// ServeMessage's error return.
+// The options never reach the envelope. Its wire form is fixed by the spec,
+// so the server always encodes Request and Response its own way, and a
+// marshaler or unmarshaler for either is ignored there. Error data is
+// payload too: marshal it with Error.WithData's options.
 //
-// The envelope decode walks tokens, so only jsontext-level options reach it.
 // Omitted params yield the zero P without consulting any unmarshaler.
 //
 // Client.SetOptions is the mirror on the other side of the wire, covering the

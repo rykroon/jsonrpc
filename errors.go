@@ -137,9 +137,9 @@ func (e Error) Code() int { return e.code }
 // Message is the short description of the error.
 func (e Error) Message() string { return e.message }
 
-// WithData returns a copy of e carrying data, marshaled to JSON.
-func (e Error) WithData(data any) (Error, error) {
-	b, err := json.Marshal(data)
+// WithData returns a copy of e carrying data, marshaled to JSON under opts.
+func (e Error) WithData(data any, opts ...json.Options) (Error, error) {
+	b, err := json.Marshal(data, opts...)
 	if err != nil {
 		return Error{}, err
 	}

@@ -43,6 +43,15 @@ func TestErrorWithData(t *testing.T) {
 	require.JSONEq(t, `{"x":1}`, string(e.Data()))
 }
 
+func TestErrorWithDataOptions(t *testing.T) {
+	e, err := NewError(-32001, "custom").WithData(
+		map[string][]int{"x": nil},
+		json.FormatNilSliceAsNull(true),
+	)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"x":null}`, string(e.Data()))
+}
+
 // withData is WithData for test data known to be marshalable.
 func withData(e Error, data any) Error {
 	c, err := e.WithData(data)

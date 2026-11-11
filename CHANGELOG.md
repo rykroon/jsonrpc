@@ -23,7 +23,7 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `string(req.ID)`, `string(req.Params)` | `req.ID.String()`, `req.Params.String()` |
 | `len(req.ID) == 0` | `req.ID.IsZero()` |
 | `nil` params or id in a constructor | `Params{}` / `ID{}` |
-| `e.SetData(v)` | `e, err = e.WithData(v)` |
+| `e.SetData(v)` | `e, err = e.WithData(v, opts...)` |
 | `e.MustSetData(v)` | `e, err = e.WithData(v)` (no panicking variant) |
 | `e.Code`, `e.Message`, `e.Data` (fields) | `e.Code()`, `e.Message()`, `e.Data()` (a copy) |
 | `Error{Code: c, Message: m, Data: d}` | `NewError(c, m).WithData(v)` |
@@ -45,8 +45,8 @@ A breaking release. Request ids and params get their own types, `ID` and
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
 `params.String()`, decode with `params.Decode`, and build replacement
 params with `NewParams`; the result stays `jsontext.Value`. A custom
-`*Request` unmarshaler builds the fields by decoding into them
-(`json.Unmarshal(raw, &req.ID)`) or with `NewParams(jsontext.Value(raw))`.
+`*Request` unmarshaler or `*Response` marshaler installed through
+`Server.SetOptions` no longer has any effect; see below.
 
 ### Changed
 
@@ -104,8 +104,17 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   `jsonrpc: params must be…` rather than `jsonrpc: marshal params: jsonrpc:
   params must be…`.
 
+- **`Server.SetOptions` is payload-only.** The options govern params into
+  `P` and `R` into the result, and no longer reach the envelope: an
+  unmarshaler for `Request` or a marshaler for `Response` or `Error` is
+  ignored when the server decodes a request or encodes a response. The spec
+  fixes the envelope's wire form, and a custom one could put an invalid
+  message on the wire.
+
 ### Added
 
+- **`Error.WithData` takes trailing `...json.Options`**, matching
+  `DecodeData`, so error data can use the same wire form as results.
 - **`ID`** — `StringID`, `IntID`, `IsZero`, `IsNull`, `String`, and its own
   `MarshalJSONTo` / `UnmarshalJSONFrom`.
 - **`Params`** — `IsObject`, `IsArray`, `IsZero`, `String`, `Decode`,

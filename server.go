@@ -57,7 +57,8 @@ type Server struct {
 	methods      map[string]RawHandler
 	middleware   []Middleware
 	errorHandler ErrorHandler
-	// opts governs every JSON operation. Nil means json/v2's defaults.
+	// opts governs params and results, never the envelope. Nil means json/v2's
+	// defaults.
 	opts json.Options
 }
 
@@ -79,13 +80,12 @@ func (s *Server) Use(mw ...Middleware) {
 	s.middleware = append(s.middleware, mw...)
 }
 
-// SetOptions installs json/v2 options for every JSON operation: the envelope,
-// params into P, R, and responses. Later calls replace earlier ones. Panics
-// once any method is registered; for one method use Raw(fn, opts) with
-// RegisterRaw.
+// SetOptions installs json/v2 options for the payload: params into P and R
+// into the result. Later calls replace earlier ones. Panics once any method is
+// registered; for one method use Raw(fn, opts) with RegisterRaw.
 //
-// The options are used as given, so an unmarshaler for *Request or a
-// marshaler for *Response replaces the envelope's own wire form.
+// The options never reach the envelope, whose wire form the spec fixes, so a
+// marshaler for Response or an unmarshaler for Request has no effect there.
 func (s *Server) SetOptions(opts ...json.Options) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -203,16 +203,15 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	if resp.IsZero() {
 		return nil, nil
 	}
-	return marshalResponse(resp, s.options())
+	return marshalResponse(resp)
 }
 
 // serveBatch decodes each element independently, so one bad element yields one
 // error entry. The array split tolerates duplicate names so a duplicate inside
 // an element is that element's error.
 func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
-	opts := s.options()
 	var elems []jsontext.Value
-	if err := json.Unmarshal(data, &elems, json.JoinOptions(opts, jsontext.AllowDuplicateNames(true))); err != nil {
+	if err := json.Unmarshal(data, &elems, jsontext.AllowDuplicateNames(true)); err != nil {
 		return s.marshalMessageError(s.handleError(ctx, Request{}, NewError(CodeParseError, err.Error())), ID{})
 	}
 	if len(elems) == 0 {
@@ -234,19 +233,13 @@ func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.
 	if len(responses) == 0 {
 		return nil, nil // all notifications: no reply at all, not an empty array
 	}
-	return marshalResponse(responses, opts)
+	return marshalResponse(responses)
 }
 
-// options returns the server's current json.Options.
-func (s *Server) options() json.Options {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.opts
-}
-
-// decode reads one message under the server's options.
+// decode reads one message. The server's options are payload-only, so the
+// envelope always decodes its own way.
 func (s *Server) decode(data jsontext.Value, req *Request) error {
-	return json.Unmarshal(data, req, s.options())
+	return json.Unmarshal(data, req)
 }
 
 // classifyDecodeError: an Error wins; malformed JSON is a Parse error; the
@@ -268,12 +261,12 @@ func classifyDecodeError(err error) Error {
 
 // marshalMessageError writes the error for a message that never reached Serve.
 func (s *Server) marshalMessageError(e Error, id ID) (jsontext.Value, error) {
-	return marshalResponse(NewErrorResponse(e, id), s.options())
+	return marshalResponse(NewErrorResponse(e, id))
 }
 
 // marshalResponse returns no bytes on failure rather than a partial buffer.
-func marshalResponse(v any, opts json.Options) (jsontext.Value, error) {
-	out, err := json.Marshal(v, opts)
+func marshalResponse(v any) (jsontext.Value, error) {
+	out, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
