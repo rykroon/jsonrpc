@@ -186,6 +186,7 @@ func TestClientCallOverHTTP(t *testing.T) {
 	_, client := newTestHTTP(t)
 
 	var result int
-	require.NoError(t, client.Call(context.Background(), "addOne", addOneParams{N: 7}, &result))
+	_, err := client.Call(context.Background(), "addOne", addOneParams{N: 7}, &result)
+	require.NoError(t, err)
 	assert.Equal(t, 8, result)
 }

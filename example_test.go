@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/rykroon/jsonrpc"
@@ -47,12 +48,35 @@ func ExampleClient_Call() {
 	c := jsonrpc.NewClient(s.Sender())
 
 	var greeting string
-	if err := c.Call(context.Background(), "greet", greetParams{Name: "world"}, &greeting); err != nil {
+	if _, err := c.Call(context.Background(), "greet", greetParams{Name: "world"}, &greeting); err != nil {
 		fmt.Println("call failed:", err)
 		return
 	}
 	fmt.Println(greeting)
 	// Output: hello world
+}
+
+// ExampleClient_SetIDGenerator replaces the default counter with a custom id
+// scheme. Call returns the id it sent, e.g. to correlate logs or cancel the
+// request later.
+func ExampleClient_SetIDGenerator() {
+	s := jsonrpc.NewServer()
+	s.Register("greet", greet)
+
+	c := jsonrpc.NewClient(s.Sender())
+	var n atomic.Int64
+	c.SetIDGenerator(func() jsonrpc.ID {
+		return jsonrpc.StringID(fmt.Sprintf("greet-%d", n.Add(1)))
+	})
+
+	var greeting string
+	id, err := c.Call(context.Background(), "greet", greetParams{Name: "world"}, &greeting)
+	if err != nil {
+		fmt.Println("call", id, "failed:", err)
+		return
+	}
+	fmt.Println(id, greeting)
+	// Output: "greet-1" hello world
 }
 
 // ExampleClient_Send builds a Request with the constructors and sends it
@@ -181,7 +205,7 @@ func ExampleClient_SetOptions() {
 	c.SetOptions(epochSeconds) // without this the params go out as RFC 3339
 
 	var got stamp
-	if err := c.Call(context.Background(), "echo", stamp{At: time.Unix(1257894000, 0)}, &got); err != nil {
+	if _, err := c.Call(context.Background(), "echo", stamp{At: time.Unix(1257894000, 0)}, &got); err != nil {
 		fmt.Println(err)
 		return
 	}

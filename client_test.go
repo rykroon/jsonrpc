@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -68,18 +69,20 @@ func TestClientCall(t *testing.T) {
 	c := NewClient(s.Sender())
 
 	var got addResult
-	require.NoError(t, c.Call(context.Background(), "add", addParams{A: 2, B: 3}, &got))
+	_, err := c.Call(context.Background(), "add", addParams{A: 2, B: 3}, &got)
+	require.NoError(t, err)
 	require.Equal(t, addResult{Sum: 5}, got)
 
 	// A nil result target skips decoding.
-	require.NoError(t, c.Call(context.Background(), "add", addParams{A: 1, B: 1}, nil))
+	_, err = c.Call(context.Background(), "add", addParams{A: 1, B: 1}, nil)
+	require.NoError(t, err)
 }
 
 func TestClientCallServerError(t *testing.T) {
 	s := newTestServer(t)
 	c := NewClient(s.Sender())
 
-	err := c.Call(context.Background(), "fail", struct{}{}, nil)
+	_, err := c.Call(context.Background(), "fail", struct{}{}, nil)
 	require.Error(t, err)
 
 	var rpcErr Error
@@ -100,9 +103,117 @@ func TestClientCallGeneratesUniqueIDs(t *testing.T) {
 		return s.Serve(ctx, req), nil
 	}))
 
-	require.NoError(t, c.Call(context.Background(), "add", addParams{}, nil))
-	require.NoError(t, c.Call(context.Background(), "add", addParams{}, nil))
+	_, err := c.Call(context.Background(), "add", addParams{}, nil)
+	require.NoError(t, err)
+	_, err = c.Call(context.Background(), "add", addParams{}, nil)
+	require.NoError(t, err)
 	require.Equal(t, []string{"1", "2"}, ids)
+}
+
+func TestClientCallReturnsID(t *testing.T) {
+	s := newTestServer(t)
+	c := NewClient(s.Sender())
+
+	id, err := c.Call(context.Background(), "add", addParams{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, IntID(1), id)
+
+	// Server errors still report the id that was sent.
+	id, err = c.Call(context.Background(), "fail", struct{}{}, nil)
+	require.Error(t, err)
+	require.Equal(t, IntID(2), id)
+
+	// Transport errors too.
+	boom := errors.New("boom")
+	id, err = NewClient(SenderFunc(func(context.Context, Request) (Response, error) {
+		return Response{}, boom
+	})).Call(context.Background(), "add", nil, nil)
+	require.ErrorIs(t, err, boom)
+	require.Equal(t, IntID(1), id)
+
+	// Nothing was sent, so no id.
+	id, err = c.Call(context.Background(), "add", 5, nil)
+	require.Error(t, err)
+	require.True(t, id.IsZero())
+}
+
+func TestClientSetIDGenerator(t *testing.T) {
+	s := newTestServer(t)
+	var sent []ID
+	c := NewClient(SenderFunc(func(ctx context.Context, req Request) (Response, error) {
+		sent = append(sent, req.ID())
+		return s.Serve(ctx, req), nil
+	}))
+	n := 0
+	c.SetIDGenerator(func() ID {
+		n++
+		return StringID("req-" + strconv.Itoa(n))
+	})
+
+	id, err := c.Call(context.Background(), "add", addParams{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, StringID("req-1"), id)
+	id, err = c.Call(context.Background(), "add", addParams{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, StringID("req-2"), id)
+	require.Equal(t, []ID{StringID("req-1"), StringID("req-2")}, sent)
+
+	// Notify sends no id, so it leaves the generator alone.
+	require.NoError(t, c.Notify(context.Background(), "add", nil))
+	require.Equal(t, 2, n)
+}
+
+func TestClientSetIDGeneratorNilRestoresCounter(t *testing.T) {
+	c := NewClient(newTestServer(t).Sender())
+	c.SetIDGenerator(func() ID { return StringID("x") })
+	c.SetIDGenerator(nil)
+	id, err := c.Call(context.Background(), "add", addParams{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, IntID(1), id)
+}
+
+func TestClientSetIDGeneratorRejectsInvalidIDs(t *testing.T) {
+	decoded := func(raw string) ID {
+		var id ID
+		require.NoError(t, json.Unmarshal([]byte(raw), &id))
+		return id
+	}
+	for name, tc := range map[string]struct {
+		id   ID
+		want string
+	}{
+		"zero":       {ID{}, "zero ID"},
+		"null":       {decoded(`null`), "returned null"},
+		"fractional": {decoded(`1.5`), "returned 1.5"},
+		"exponent":   {decoded(`1e3`), "returned 1e3"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sent := false
+			c := NewClient(SenderFunc(func(context.Context, Request) (Response, error) {
+				sent = true
+				return Response{}, nil
+			}))
+			c.SetIDGenerator(func() ID { return tc.id })
+			id, err := c.Call(context.Background(), "add", nil, nil)
+			require.ErrorContains(t, err, tc.want)
+			require.True(t, id.IsZero())
+			require.False(t, sent)
+		})
+	}
+
+	// Negative integers are fine.
+	c := NewClient(newTestServer(t).Sender())
+	c.SetIDGenerator(func() ID { return IntID(-7) })
+	id, err := c.Call(context.Background(), "add", addParams{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, IntID(-7), id)
+}
+
+func TestClientSetIDGeneratorAfterUsePanics(t *testing.T) {
+	c := NewClient(newTestServer(t).Sender())
+	_, err := c.Call(context.Background(), "add", addParams{}, nil)
+	require.NoError(t, err)
+	require.Panics(t, func() { c.SetIDGenerator(func() ID { return IntID(1) }) })
 }
 
 func TestClientNotify(t *testing.T) {
@@ -128,14 +239,14 @@ func TestClientCallChecksResponseID(t *testing.T) {
 
 	t.Run("a mismatched success is rejected undecoded", func(t *testing.T) {
 		got := addResult{Sum: -1}
-		err := respond(NewSuccessResponse(jsontext.Value(`{"sum":5}`), IntID(99))).
+		_, err := respond(NewSuccessResponse(jsontext.Value(`{"sum":5}`), IntID(99))).
 			Call(context.Background(), "add", nil, &got)
 		require.ErrorContains(t, err, "response id 99 does not match request id 1")
 		require.Equal(t, addResult{Sum: -1}, got)
 	})
 
 	t.Run("a mismatched error is not reported as the server's", func(t *testing.T) {
-		err := respond(NewErrorResponse(NewError(CodeInternalError, "theirs"), StringID("1"))).
+		_, err := respond(NewErrorResponse(NewError(CodeInternalError, "theirs"), StringID("1"))).
 			Call(context.Background(), "add", nil, nil)
 		require.ErrorContains(t, err, `response id "1" does not match request id 1`)
 		_, isRPC := errors.AsType[Error](err)
@@ -143,7 +254,7 @@ func TestClientCallChecksResponseID(t *testing.T) {
 	})
 
 	t.Run("a null id is accepted on an error", func(t *testing.T) {
-		err := respond(NewErrorResponse(NewError(CodeParseError, "bad"), ID{})).
+		_, err := respond(NewErrorResponse(NewError(CodeParseError, "bad"), ID{})).
 			Call(context.Background(), "add", nil, nil)
 		e, ok := errors.AsType[Error](err)
 		require.True(t, ok)
@@ -151,7 +262,7 @@ func TestClientCallChecksResponseID(t *testing.T) {
 	})
 
 	t.Run("but not on a success", func(t *testing.T) {
-		err := respond(NewSuccessResponse(jsontext.Value(`1`), ID{})).
+		_, err := respond(NewSuccessResponse(jsontext.Value(`1`), ID{})).
 			Call(context.Background(), "add", nil, nil)
 		require.ErrorContains(t, err, "response id null does not match")
 	})
@@ -189,7 +300,7 @@ func TestClientSetOptions(t *testing.T) {
 	t.Run("a client without the options cannot reach the server", func(t *testing.T) {
 		c := NewClient(newServer().Sender())
 		var got tempResult
-		err := c.Call(context.Background(), "echo", tempParams{T: 21.5}, &got)
+		_, err := c.Call(context.Background(), "echo", tempParams{T: 21.5}, &got)
 		// The client marshals a bare number; the server's unmarshaler wants a string.
 		var e Error
 		require.ErrorAs(t, err, &e)
@@ -201,7 +312,8 @@ func TestClientSetOptions(t *testing.T) {
 		c.SetOptions(tempOptions)
 
 		var got tempResult
-		require.NoError(t, c.Call(context.Background(), "echo", tempParams{T: 21.5}, &got))
+		_, err := c.Call(context.Background(), "echo", tempParams{T: 21.5}, &got)
+		require.NoError(t, err)
 		require.Equal(t, temperature(21.5), got.T)
 	})
 
@@ -230,7 +342,8 @@ func TestClientSetOptionsPanicsAfterUse(t *testing.T) {
 
 	t.Run("after Call", func(t *testing.T) {
 		c := newIdleClient()
-		require.NoError(t, c.Call(context.Background(), "echo", tempParams{}, nil))
+		_, err := c.Call(context.Background(), "echo", tempParams{}, nil)
+		require.NoError(t, err)
 		require.Panics(t, func() { c.SetOptions(tempOptions) })
 	})
 

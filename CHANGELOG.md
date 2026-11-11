@@ -40,6 +40,7 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `resp.Result`, `resp.ID`, `resp.JSONRPC` | `resp.Result()`, `resp.ID()`, `resp.JSONRPC()` |
 | `if resp.Error != nil { use(*resp.Error) }` | `if e, ok := resp.Error(); ok { use(e) }` |
 | `&Response{...}` | `NewSuccessResponse(...)` / `NewErrorResponse(...)` |
+| `err := c.Call(...)` | `id, err := c.Call(...)` (or `_, err :=`) |
 
 `StringID` and `IntID` cannot fail, so the error handling around `NewID`
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
@@ -113,6 +114,13 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 
 ### Added
 
+- **`Client.SetIDGenerator(func() ID)`** — replaces the default counter as the
+  source of `Call`'s ids. `Call` refuses a zero, null, or fractional id from
+  it without sending. Must be called before the first `Call` or `Notify`; nil
+  restores the counter.
+- **`Client.Call` returns the `ID` it sent**, alongside the error, so a caller
+  can correlate or cancel the request. It is returned even when the call fails
+  after sending, and is zero if nothing was sent.
 - **`Error.WithData` takes trailing `...json.Options`**, matching
   `DecodeData`, so error data can use the same wire form as results.
 - **`ID`** — `StringID`, `IntID`, `IsZero`, `IsNull`, `String`, and its own

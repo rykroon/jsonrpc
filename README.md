@@ -32,7 +32,7 @@ func main() {
     c := jsonrpc.NewClient(s.Sender())
 
     var sum int
-    if err := c.Call(context.Background(), "add", AddParams{A: 2, B: 3}, &sum); err != nil {
+    if _, err := c.Call(context.Background(), "add", AddParams{A: 2, B: 3}, &sum); err != nil {
         panic(err)
     }
     fmt.Println(sum) // 5
@@ -136,7 +136,8 @@ as an Internal error carrying the error's message.
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params
   marshaling, id generation, and result decoding; server errors come back
-  as `Error`. `Client.Send` is the low-level escape hatch, round-tripping
+  as `Error`. `Call` returns the id it sent, and `Client.SetIDGenerator`
+  replaces the default counter with your own id scheme. `Client.Send` is the low-level escape hatch, round-tripping
   a `Request` through a `Sender` (in-process, HTTP, WebSocket, etc.).
 - `Server.SetErrorHandler` — one place to decide what every failure looks
   like on the wire: sanitize messages, remap codes, attach `Data`, log the

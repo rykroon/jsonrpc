@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // ID is a request id: a JSON string, number, or null, held as its encoding so
@@ -43,6 +44,16 @@ func (i ID) IsZero() bool {
 
 func (i ID) IsNull() bool {
 	return i.raw == "null"
+}
+
+// isClientID reports whether i is an id a client may send: a string or an
+// integer, as StringID and IntID make. The server side is laxer, echoing back
+// null and fractional ids it received.
+func (i ID) isClientID() bool {
+	if i.IsZero() || i.IsNull() {
+		return false
+	}
+	return i.raw[0] == '"' || !strings.ContainsAny(i.raw, ".eE")
 }
 
 // String returns the id's JSON, so "1" and 1 differ, or "" when absent.

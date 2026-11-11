@@ -198,7 +198,8 @@ func TestNewParamsRequiresStructured(t *testing.T) {
 			sent++
 			return Response{}, nil
 		}))
-		require.ErrorContains(t, c.Call(context.Background(), "m", 5, nil), "params must be a JSON object or array")
+		_, err := c.Call(context.Background(), "m", 5, nil)
+		require.ErrorContains(t, err, "params must be a JSON object or array")
 		require.ErrorContains(t, c.Notify(context.Background(), "m", 5), "params must be a JSON object or array")
 		require.Zero(t, sent)
 	})

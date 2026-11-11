@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -36,15 +37,22 @@ func (s *Server) Sender() Sender {
 // decode results; Send is the escape hatch for pre-built Request values.
 type Client struct {
 	sender Sender
-	nextID atomic.Int64
 
-	mu   sync.Mutex
-	opts json.Options
-	used bool
+	mu    sync.Mutex
+	opts  json.Options
+	idGen func() ID
+	used  bool
 }
 
 func NewClient(sender Sender) *Client {
-	return &Client{sender: sender}
+	return &Client{sender: sender, idGen: counterIDs()}
+}
+
+// counterIDs returns a generator of the ids 1, 2, 3, ..., safe for concurrent
+// use.
+func counterIDs() func() ID {
+	var n atomic.Int64
+	return func() ID { return IntID(n.Add(1)) }
 }
 
 // SetOptions installs json/v2 options for the params Call and Notify marshal
@@ -63,49 +71,85 @@ func (c *Client) SetOptions(opts ...json.Options) {
 	c.opts = json.JoinOptions(opts...)
 }
 
-// options returns the client's options, closing them to further SetOptions.
-func (c *Client) options() json.Options {
+// SetIDGenerator installs gen as the source of the ids Call sends, in place of
+// the default counter (1, 2, 3, ...). gen must be safe for concurrent use if
+// Call is, and should return a StringID or IntID that is unique among the
+// client's in-flight calls; Call fails on a zero, null, or fractional id. A nil
+// gen restores the counter. Panics once Call or Notify has run.
+func (c *Client) SetIDGenerator(gen func() ID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.used {
+		panic("jsonrpc: SetIDGenerator must be called before Call or Notify")
+	}
+	if gen == nil {
+		gen = counterIDs()
+	}
+	c.idGen = gen
+}
+
+// config returns the client's options and id generator, closing them to
+// further SetOptions and SetIDGenerator.
+func (c *Client) config() (json.Options, func() ID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.used = true
-	return c.opts
+	return c.opts, c.idGen
+}
+
+// newID returns the next id from gen, checking it is one a client may send.
+func newID(gen func() ID) (ID, error) {
+	id := gen()
+	if !id.isClientID() {
+		if id.IsZero() {
+			return ID{}, errors.New("jsonrpc: id generator returned a zero ID")
+		}
+		return ID{}, fmt.Errorf("jsonrpc: id generator returned %s; want a string or integer", id)
+	}
+	return id, nil
 }
 
 // Call invokes method with params (marshaled by NewParams) and decodes the
-// reply into result; a nil result skips decoding. The id comes from an internal
-// counter, and a response carrying a different id is an error. Errors reported
-// by the server are returned as Error; any other error is a transport or
-// decode failure.
-func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
-	opts := c.options()
+// reply into result; a nil result skips decoding. It returns the request's id,
+// which comes from the generator installed by SetIDGenerator or else an
+// internal counter; a response carrying a different id is an error. The id is
+// returned whenever the request was sent, even with an error, and is zero if
+// it was not. Errors reported by the server are returned as Error; any other
+// error is a transport or decode failure.
+func (c *Client) Call(ctx context.Context, method string, params any, result any) (ID, error) {
+	opts, gen := c.config()
 	p, err := NewParams(params, opts)
 	if err != nil {
-		return err
+		return ID{}, err
 	}
-	id := IntID(c.nextID.Add(1))
+	id, err := newID(gen)
+	if err != nil {
+		return ID{}, err
+	}
 	resp, err := c.sender.Send(ctx, NewRequest(method, p, id))
 	if err != nil {
-		return err
+		return id, err
 	}
 	if resp.IsZero() {
-		return fmt.Errorf("jsonrpc: transport returned no response for call %q", method)
+		return id, fmt.Errorf("jsonrpc: transport returned no response for call %q", method)
 	}
 	// Another call's result must not decode as this one's. A null id is
 	// allowed on an error: the server could not read ours.
 	rpcErr, isErr := resp.Error()
 	if resp.ID() != id && !(resp.ID().IsNull() && isErr) {
-		return fmt.Errorf("jsonrpc: response id %s does not match request id %s for call %q", resp.ID(), id, method)
+		return id, fmt.Errorf("jsonrpc: response id %s does not match request id %s for call %q", resp.ID(), id, method)
 	}
 	if isErr {
-		return rpcErr
+		return id, rpcErr
 	}
-	return resp.DecodeResult(result, opts)
+	return id, resp.DecodeResult(result, opts)
 }
 
 // Notify sends a notification: the server dispatches method but produces no
 // response. The error reports transport failures only.
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
-	p, err := NewParams(params, c.options())
+	opts, _ := c.config()
+	p, err := NewParams(params, opts)
 	if err != nil {
 		return err
 	}

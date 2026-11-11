@@ -23,7 +23,7 @@ func TestErrorIsMatchesCode(t *testing.T) {
 	s.Register("find", func(context.Context, struct{}) (any, error) {
 		return nil, errNotFound
 	})
-	err := NewClient(s.Sender()).Call(context.Background(), "find", struct{}{}, nil)
+	_, err := NewClient(s.Sender()).Call(context.Background(), "find", struct{}{}, nil)
 	require.ErrorIs(t, err, errNotFound)
 }
 
