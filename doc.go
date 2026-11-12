@@ -68,13 +68,19 @@
 // reports, notifications included, goes to the ErrorHandler installed with
 // Server.SetErrorHandler, which decides the Error the client sees.
 //
-// DefaultErrorHandler sends an Error verbatim, so returning one names the
-// code, message, and Data yourself, and reports anything else, wrapped or
-// not, as an Internal error carrying its message. A server that must not leak
+// Error is the error object as data, and does not implement error. To report
+// one from a handler, return its Err; FromError recovers it, through any %w
+// wrapping, on either side of the wire:
+//
+//	return nil, jsonrpc.NewError(-32004, "user not found").Err()
+//
+// DefaultErrorHandler sends an error carrying an Error verbatim, so returning
+// one names the code, message, and Data yourself, and reports anything else as
+// an Internal error carrying its message. A server that must not leak
 // internals installs its own:
 //
 //	s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) jsonrpc.Error {
-//		if e, ok := errors.AsType[jsonrpc.Error](err); ok {
+//		if e, ok := jsonrpc.FromError(err); ok {
 //			return e // a classified failure is already client-safe
 //		}
 //		log.Printf("rpc %s: %v", req.Method(), err)
@@ -86,7 +92,8 @@
 // Client wraps a Sender, which round-trips a Request to a Response over some
 // transport: Server.Sender in-process, jsonrpchttp over HTTP, or your own.
 // Client.Call marshals params, sends, and decodes the result, returning
-// server-reported errors as Error; Client.Notify sends a notification.
+// a server-reported error as an error FromError recovers the Error from;
+// Client.Notify sends a notification.
 // Client.SetOptions gives both the same json/v2 options the server uses. For
 // full control build a Request with NewRequest or NewNotification and send it
 // with Client.Send.
@@ -104,7 +111,8 @@
 //
 // Response.Result and Error.Data are jsontext.Value because the spec leaves
 // their types open; both return copies, so the bytes a Response or Error holds
-// cannot be altered. Register and Raw decode params and results for you.
+// cannot be altered. Error stores its data as a string, so Errors compare with
+// ==. Register and Raw decode params and results for you.
 //
 // The two the spec does constrain have their own types. Params holds an
 // object or array, or is zero when absent; NewParams enforces the shape. ID

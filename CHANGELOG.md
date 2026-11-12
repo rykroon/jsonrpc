@@ -7,8 +7,10 @@ version is 0, minor releases may carry breaking changes.
 ## [v0.6.0] — 2026-11-11
 
 A breaking release. Request ids and params get their own types, `ID` and
-`Params`, in place of `jsontext.Value`, and `Error`, `Request`, and
-`Response` are used by value.
+`Params`, in place of `jsontext.Value`; `Error`, `Request`, and `Response`
+are used by value; and `Error` becomes plain data that no longer implements
+`error`, carried as one by `Err()` and recovered with `FromError`, as gRPC's
+`status` package does.
 
 ### Migrating from v0.5.0
 
@@ -31,8 +33,9 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `resp.Decode(&v)` | `resp.DecodeResult(&v)` |
 | `NewError(...) *Error` | `NewError(...) Error` |
 | `ErrorHandler func(...) *Error` | `ErrorHandler func(...) Error` |
-| `errors.AsType[*jsonrpc.Error](err)` | `errors.AsType[jsonrpc.Error](err)` |
-| `err == ErrNotFound` | `errors.Is(err, ErrNotFound)` |
+| `return nil, jsonrpc.NewError(...)` (in a handler or middleware) | `return nil, jsonrpc.NewError(...).Err()` |
+| `errors.AsType[*jsonrpc.Error](err)`, `errors.As(err, &e)` | `e, ok := jsonrpc.FromError(err)` |
+| `err == ErrNotFound`, `errors.Is(err, ErrNotFound)` | `e, ok := jsonrpc.FromError(err); ok && e.Code() == code`, or `errors.Is(err, ErrNotFound.Err())` |
 | `*Request` in `Serve`, `Sender`, `SenderFunc`, `ErrorHandler`, `Client.Send` | `Request` |
 | `req.Method`, `req.Params`, `req.ID`, `req.JSONRPC` | `req.Method()`, `req.Params()`, `req.ID()`, `req.JSONRPC()` |
 | `&Request{...}` | `NewRequest(...)` / `NewNotification(...)` |
@@ -61,16 +64,20 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   and `Result()` returns a copy of the raw bytes.
   `Serve` and `Sender` return the zero `Response`, not nil, for a
   notification; check `IsZero()`.
-- **`Error` is a value type.** `NewError`, `WithData`, `ErrorHandler`, and
-  `DefaultErrorHandler` use `Error` instead of `*Error`, and `Client.Call`
-  returns server errors as `Error`. A handler can no longer return a typed-nil
-  `*Error`, so the server's guards for it, and for an `ErrorHandler`
-  returning nil, are gone. A handler returning a `*Error` is no longer recognized as
-  classified and goes to the `ErrorHandler` as an unclassified error.
-- **`errors.Is` matches `Error` by code.** `Error.Is` compares the code only,
-  so a sentinel such as `ErrNotFound` matches after `WithData`, `%w`
-  wrapping, or a round trip through `Client.Call`. Previously it matched
-  only the identical `*Error`.
+- **`Error` is a value type that no longer implements `error`.** It is the
+  JSON-RPC error object as data, like `Request` and `Response`, and is
+  comparable with `==`. `NewError`, `WithData`, `ErrorHandler`, and
+  `DefaultErrorHandler` use `Error` instead of `*Error`. A handler or
+  middleware reports one by returning `e.Err()`, an error of an unexported
+  type; `FromError(err)` recovers the `Error` through any `%w` wrapping.
+  `Client.Call` returns a server error the same way, and the `ErrorHandler`
+  receives decode and dispatch failures that way too. A handler can no longer
+  return a typed-nil `*Error`, so the server's guards for it, and for an
+  `ErrorHandler` returning nil, are gone.
+- **Errors from `Err()` match by code under `errors.Is`.** So
+  `errors.Is(err, ErrNotFound.Err())` holds after `WithData`, `%w` wrapping,
+  or a round trip through `Client.Call`. Previously `errors.Is` matched only
+  the identical `*Error`.
 - **`Error.WithData` replaces `SetData` and `MustSetData`.** It returns a
   copy instead of mutating the receiver, so a shared error such as
   `var ErrNotFound = jsonrpc.NewError(...)` can't be changed by one request
@@ -126,10 +133,13 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
 
 ### Added
 
+- **`Error.Err()` and `FromError(err)`** — convert between an `Error` and the
+  `error` that carries it, in the manner of gRPC's `Status.Err` and
+  `status.FromError`.
 - **`ErrParse`, `ErrInvalidRequest`, `ErrMethodNotFound`, `ErrInvalidParams`,
-  and `ErrInternal`** — the spec's predefined errors as values. `errors.Is`
-  matches by code, so `errors.Is(err, jsonrpc.ErrMethodNotFound)` holds for
-  any `Error` with that code, including one returned by `Client.Call`.
+  and `ErrInternal`** — the spec's predefined errors as `Error` values, with
+  the spec's messages. Return one with `.Err()`; recognize one with
+  `FromError` and `Code()`, or with `errors.Is(err, ErrMethodNotFound.Err())`.
 - **`Client.SetIDGenerator(func() ID)`** — replaces the default counter as the
   source of `Call`'s ids. `Call` refuses a zero, null, or fractional id from
   it without sending. Must be called before the first `Call` or `Notify`; nil

@@ -102,7 +102,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 		return tokenError(err)
 	}
 	if tok.Kind() != jsontext.KindBeginObject {
-		return NewError(CodeInvalidRequest, "request must be a JSON object")
+		return NewError(CodeInvalidRequest, "request must be a JSON object").Err()
 	}
 
 	for d.PeekKind() != jsontext.KindEndObject {
@@ -118,7 +118,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 				return tokenError(err)
 			}
 			if tok.Kind() != jsontext.KindString {
-				return NewError(CodeInvalidRequest, "jsonrpc must be a string")
+				return NewError(CodeInvalidRequest, "jsonrpc must be a string").Err()
 			}
 			// Serve judges the version; failing here would discard the id.
 			req.jsonrpc = tok.String()
@@ -129,7 +129,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 				return tokenError(err)
 			}
 			if tok.Kind() != jsontext.KindString {
-				return NewError(CodeInvalidRequest, "method must be a string")
+				return NewError(CodeInvalidRequest, "method must be a string").Err()
 			}
 			req.method = tok.String()
 
@@ -141,7 +141,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			p, err := paramsFromValue(val)
 			if err != nil {
 				// null is present but unstructured; omit params to send none.
-				return NewError(CodeInvalidRequest, "params must be an object or array")
+				return NewError(CodeInvalidRequest, "params must be an object or array").Err()
 			}
 			req.params = p
 
@@ -152,7 +152,7 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			}
 			id, err := idFromValue(val)
 			if err != nil {
-				return NewError(CodeInvalidRequest, "id must be a string, number, or null")
+				return NewError(CodeInvalidRequest, "id must be a string, number, or null").Err()
 			}
 			req.id = id
 
@@ -172,9 +172,9 @@ func (req *Request) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 }
 
 // tokenError: a duplicate name is Invalid Request, anything else a Parse error.
-func tokenError(err error) Error {
+func tokenError(err error) error {
 	if errors.Is(err, jsontext.ErrDuplicateName) {
-		return NewError(CodeInvalidRequest, err.Error())
+		return NewError(CodeInvalidRequest, err.Error()).Err()
 	}
-	return NewError(CodeParseError, err.Error())
+	return NewError(CodeParseError, err.Error()).Err()
 }

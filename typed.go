@@ -14,7 +14,7 @@ func Raw[P, R any](fn Handler[P, R], opts ...json.Options) RawHandler {
 	return func(ctx context.Context, params Params) (jsontext.Value, error) {
 		var p P
 		if err := params.Decode(&p, opts...); err != nil {
-			return nil, NewError(CodeInvalidParams, err.Error())
+			return nil, NewError(CodeInvalidParams, err.Error()).Err()
 		}
 		r, err := fn(ctx, p)
 		if err != nil {

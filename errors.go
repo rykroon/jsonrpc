@@ -21,9 +21,12 @@ const (
 	CodeServerErrorMin = -32099 // last (lowest) server-defined code
 )
 
-// The spec's predefined errors, with its messages. Error.Is compares codes, so
-// errors.Is(err, ErrMethodNotFound) matches any Error carrying that code,
-// whatever its message or data.
+// The spec's predefined errors, with its messages. Return one from a handler
+// with Err, and recognize one with FromError and Code:
+//
+//	if e, ok := jsonrpc.FromError(err); ok && e.Code() == jsonrpc.CodeMethodNotFound {
+//		// the server has no such method
+//	}
 var (
 	ErrParse          = NewError(CodeParseError, "Parse error")
 	ErrInvalidRequest = NewError(CodeInvalidRequest, "Invalid Request")
@@ -32,13 +35,86 @@ var (
 	ErrInternal       = NewError(CodeInternalError, "Internal error")
 )
 
-// Error is the JSON-RPC error object. It is immutable: build one with NewError
-// and WithData, and read it through its accessors. Its optional data is raw
-// JSON; Data returns a copy, so an Error never shares bytes with a caller.
+// Error is the JSON-RPC error object. It is immutable data, like Request and
+// Response, and is comparable with ==. It does not implement error: Err wraps it
+// as one, and FromError recovers it, as gRPC's status package does. Build one
+// with NewError and WithData, and read it through its accessors.
 type Error struct {
 	code    int
 	message string
-	data    jsontext.Value
+	// data is the optional raw JSON, "" when absent. A string keeps Error
+	// comparable and its bytes unshared.
+	data string
+}
+
+func NewError(code int, message string) Error {
+	return Error{code: code, message: message}
+}
+
+// Code is the error code.
+func (e Error) Code() int { return e.code }
+
+// Message is the short description of the error.
+func (e Error) Message() string { return e.message }
+
+// WithData returns a copy of e carrying data, marshaled to JSON under opts.
+func (e Error) WithData(data any, opts ...json.Options) (Error, error) {
+	b, err := json.Marshal(data, opts...)
+	if err != nil {
+		return Error{}, err
+	}
+	e.data = string(b)
+	return e, nil
+}
+
+// Data returns a copy of the raw data, nil when absent.
+func (e Error) Data() jsontext.Value {
+	if e.data == "" {
+		return nil
+	}
+	return jsontext.Value(e.data)
+}
+
+// DecodeData unmarshals the data into into under opts. Absent data leaves into
+// untouched.
+func (e Error) DecodeData(into any, opts ...json.Options) error {
+	if e.data == "" {
+		return nil
+	}
+	return json.Unmarshal([]byte(e.data), into, opts...)
+}
+
+// Err returns e as an error, for returning from a Handler, RawHandler, or
+// Middleware. FromError recovers e from it.
+func (e Error) Err() error {
+	return &rpcError{e}
+}
+
+// FromError reports the Error carried by err, looking through %w wrapping.
+// It returns false for nil and for errors that carry no Error.
+func FromError(err error) (Error, bool) {
+	if r, ok := errors.AsType[*rpcError](err); ok {
+		return r.e, true
+	}
+	return Error{}, false
+}
+
+// rpcError carries an Error as an error. It is unexported so callers match it
+// only through FromError.
+type rpcError struct {
+	e Error
+}
+
+func (r *rpcError) Error() string {
+	return fmt.Sprintf("jsonrpc: %d %s", r.e.code, r.e.message)
+}
+
+// Is reports whether target carries an Error with the same code, so
+// errors.Is(err, jsonrpc.ErrMethodNotFound.Err()) matches whatever the message
+// or data.
+func (r *rpcError) Is(target error) bool {
+	t, ok := target.(*rpcError)
+	return ok && t.e.code == r.e.code
 }
 
 var (
@@ -63,11 +139,11 @@ func (e Error) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if err := enc.WriteToken(jsontext.String(e.message)); err != nil {
 		return err
 	}
-	if len(e.data) > 0 {
+	if e.data != "" {
 		if err := enc.WriteToken(jsontext.String("data")); err != nil {
 			return err
 		}
-		if err := enc.WriteValue(e.data); err != nil {
+		if err := enc.WriteValue(jsontext.Value(e.data)); err != nil {
 			return err
 		}
 	}
@@ -121,8 +197,8 @@ func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			if err != nil {
 				return err
 			}
-			// ReadValue's buffer dies at the next read.
-			out.data = val.Clone()
+			// The conversion copies ReadValue's buffer, which dies at the next read.
+			out.data = string(val)
 		default:
 			if err := d.SkipValue(); err != nil {
 				return err
@@ -139,49 +215,4 @@ func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	}
 	*e = out
 	return nil
-}
-
-func (e Error) Error() string {
-	return fmt.Sprintf("jsonrpc: %d %s", e.code, e.message)
-}
-
-// Is reports whether target is an Error with the same code, so errors.Is
-// matches a sentinel even after WithData, wrapping, or a round trip.
-func (e Error) Is(target error) bool {
-	t, ok := target.(Error)
-	return ok && t.code == e.code
-}
-
-func NewError(code int, message string) Error {
-	return Error{code: code, message: message}
-}
-
-// Code is the error code.
-func (e Error) Code() int { return e.code }
-
-// Message is the short description of the error.
-func (e Error) Message() string { return e.message }
-
-// WithData returns a copy of e carrying data, marshaled to JSON under opts.
-func (e Error) WithData(data any, opts ...json.Options) (Error, error) {
-	b, err := json.Marshal(data, opts...)
-	if err != nil {
-		return Error{}, err
-	}
-	e.data = b
-	return e, nil
-}
-
-// Data returns a copy of the raw data, nil when absent.
-func (e Error) Data() jsontext.Value {
-	return e.data.Clone()
-}
-
-// DecodeData unmarshals the data into into under opts. Absent data leaves into
-// untouched.
-func (e Error) DecodeData(into any, opts ...json.Options) error {
-	if len(e.data) == 0 {
-		return nil
-	}
-	return json.Unmarshal(e.data, into, opts...)
 }

@@ -27,7 +27,7 @@ func newTestServer(t *testing.T) *Server {
 		return addResult{Sum: p.A + p.B}, nil
 	})
 	s.Register("fail", func(_ context.Context, _ struct{}) (any, error) {
-		return nil, withData(NewError(-32001, "custom"), map[string]int{"x": 1})
+		return nil, withData(NewError(-32001, "custom"), map[string]int{"x": 1}).Err()
 	})
 	s.Register("boom", func(_ context.Context, _ struct{}) (any, error) {
 		return nil, errors.New("internal boom")

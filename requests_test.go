@@ -3,7 +3,6 @@ package jsonrpc
 import (
 	jsonv1 "encoding/json"
 	"encoding/json/v2"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,7 +35,7 @@ func TestRequestDecodesItself(t *testing.T) {
 		err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":1,"method":"add","params":5}`), &req)
 		require.ErrorContains(t, err, "params must be an object or array")
 
-		e, ok := errors.AsType[Error](err)
+		e, ok := FromError(err)
 		require.True(t, ok, "the Error survives json/v2's wrapping")
 		require.Equal(t, CodeInvalidRequest, e.Code())
 	})

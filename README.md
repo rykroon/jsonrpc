@@ -114,14 +114,26 @@ outside it — the `Request` is already built, and the envelope is the
 ## Errors
 
 Everything that can fail returns a plain `error`, and every error a handler
-or middleware returns goes to the server's `ErrorHandler`. Returning a
-`jsonrpc.Error` says you classified the failure yourself; anything else leaves
-that to the `ErrorHandler`, so handlers and middleware can wrap freely with
-`%w`:
+or middleware returns goes to the server's `ErrorHandler`.
+
+`jsonrpc.Error` is the error object as plain data — an immutable, comparable
+value — and does not implement `error`, much like gRPC's `status.Status`.
+`Err()` wraps it as one, and `jsonrpc.FromError` gets it back, looking through
+`%w` wrapping. Returning an `Error`'s `Err()` says you classified the failure
+yourself; anything else leaves that to the `ErrorHandler`:
 
 ```go
+func getUser(ctx context.Context, p GetUserParams) (User, error) {
+    u, ok := users[p.ID]
+    if !ok {
+        e, _ := jsonrpc.NewError(-32004, "user not found").WithData(p.ID)
+        return User{}, e.Err()
+    }
+    return u, nil
+}
+
 s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) jsonrpc.Error {
-    if e, ok := errors.AsType[jsonrpc.Error](err); ok {
+    if e, ok := jsonrpc.FromError(err); ok {
         return e // already client-safe
     }
     log.Printf("rpc %s: %v", req.Method(), err) // keep the detail off the wire
@@ -129,18 +141,23 @@ s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) json
 })
 ```
 
-The default sends `Error` values through untouched and reports anything else
-as an Internal error carrying the error's message.
+The default sends a carried `Error` through untouched and reports anything
+else as an Internal error carrying the error's message.
 
-The spec's predefined errors are available as `ErrParse`, `ErrInvalidRequest`,
-`ErrMethodNotFound`, `ErrInvalidParams`, and `ErrInternal`. `errors.Is` matches
-an `Error` by code, so a caller can test what came back from `Client.Call`:
+The spec's predefined errors are available as the `Error` values `ErrParse`,
+`ErrInvalidRequest`, `ErrMethodNotFound`, `ErrInvalidParams`, and
+`ErrInternal`. A caller tests what came back from `Client.Call` with
+`FromError`:
 
 ```go
-if _, err := c.Call(ctx, "add", params, &sum); errors.Is(err, jsonrpc.ErrMethodNotFound) {
+_, err := c.Call(ctx, "add", params, &sum)
+if e, ok := jsonrpc.FromError(err); ok && e.Code() == jsonrpc.CodeMethodNotFound {
     // the server has no such method
 }
 ```
+
+Errors made by `Err()` also match each other by code under `errors.Is`, so
+`errors.Is(err, jsonrpc.ErrMethodNotFound.Err())` works too.
 
 ## What it gives you
 
@@ -150,8 +167,8 @@ if _, err := c.Call(ctx, "add", params, &sum); errors.Is(err, jsonrpc.ErrMethodN
 - `Middleware` / `Server.Use` — compose auth, logging, and validation
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params
-  marshaling, id generation, and result decoding; server errors come back
-  as `Error`. `Call` returns the id it sent, and `Client.SetIDGenerator`
+  marshaling, id generation, and result decoding; a server error comes back
+  as an `error` that `FromError` turns into an `Error`. `Call` returns the id it sent, and `Client.SetIDGenerator`
   replaces the default counter with your own id scheme. `Client.Send` is the
   low-level escape hatch, round-tripping a `Request` through a `Sender`
   (in-process, HTTP, WebSocket, etc.).

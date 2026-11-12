@@ -21,17 +21,18 @@ type RawHandler func(ctx context.Context, params Params) (jsontext.Value, error)
 type Middleware func(next RawHandler) RawHandler
 
 // ErrorHandler turns every error the server reports, from decoding, a handler,
-// or Serve itself, into the Error sent back. err may already be an Error. req
+// or Serve itself, into the Error sent back. err may carry an Error (see
+// FromError). req
 // is zero when nothing could be decoded and may be partial after a failed
 // decode. It also runs for notifications, whose result is discarded, so the
 // failure can be logged.
 type ErrorHandler func(ctx context.Context, req Request, err error) Error
 
-// DefaultErrorHandler sends an Error verbatim and reports anything else as an
+// DefaultErrorHandler sends an error carrying an Error verbatim and reports anything else as an
 // Internal error carrying its message. Servers that must not leak internals
 // install their own.
 func DefaultErrorHandler(_ context.Context, _ Request, err error) Error {
-	if e, ok := errors.AsType[Error](err); ok {
+	if e, ok := FromError(err); ok {
 		return e
 	}
 	return NewError(CodeInternalError, err.Error())
@@ -141,10 +142,10 @@ func (s *Server) Register[P, R any](name string, fn Handler[P, R], mw ...Middlew
 func (s *Server) Serve(ctx context.Context, req Request) Response {
 	id := req.ID()
 	if req.JSONRPC() != Version {
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`)), id)
+		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, `jsonrpc must be "2.0"`).Err()), id)
 	}
 	if req.Method() == "" {
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, "missing method")), id)
+		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeInvalidRequest, "missing method").Err()), id)
 	}
 
 	s.mu.RLock()
@@ -155,7 +156,7 @@ func (s *Server) Serve(ctx context.Context, req Request) Response {
 		if req.IsNotification() {
 			return Response{}
 		}
-		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method())), id)
+		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method()).Err()), id)
 	}
 
 	result, err := h(ctx, req.Params())
@@ -190,7 +191,7 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 	var req Request
 	if err := s.decode(data, &req); err != nil {
 		id := req.ID()
-		e := s.handleError(ctx, req, classifyDecodeError(err))
+		e := s.handleError(ctx, req, classifyDecodeError(err).Err())
 		// An id read before the failure lets the client correlate.
 		return s.marshalMessageError(e, id)
 	}
@@ -207,17 +208,17 @@ func (s *Server) ServeMessage(ctx context.Context, data jsontext.Value) (jsontex
 func (s *Server) serveBatch(ctx context.Context, data jsontext.Value) (jsontext.Value, error) {
 	var elems []jsontext.Value
 	if err := json.Unmarshal(data, &elems, jsontext.AllowDuplicateNames(true)); err != nil {
-		return s.marshalMessageError(s.handleError(ctx, Request{}, NewError(CodeParseError, err.Error())), ID{})
+		return s.marshalMessageError(s.handleError(ctx, Request{}, NewError(CodeParseError, err.Error()).Err()), ID{})
 	}
 	if len(elems) == 0 {
-		return s.marshalMessageError(s.handleError(ctx, Request{}, NewError(CodeInvalidRequest, "empty batch")), ID{})
+		return s.marshalMessageError(s.handleError(ctx, Request{}, NewError(CodeInvalidRequest, "empty batch").Err()), ID{})
 	}
 	responses := make([]Response, 0, len(elems))
 	for _, elem := range elems {
 		var req Request
 		if err := s.decode(elem, &req); err != nil {
 			id := req.ID()
-			e := s.handleError(ctx, req, classifyDecodeError(err))
+			e := s.handleError(ctx, req, classifyDecodeError(err).Err())
 			responses = append(responses, NewErrorResponse(e, id))
 			continue
 		}
@@ -240,7 +241,7 @@ func (s *Server) decode(data jsontext.Value, req *Request) error {
 // classifyDecodeError: an Error wins; malformed JSON is a Parse error; the
 // rest is Invalid Request.
 func classifyDecodeError(err error) Error {
-	if e, ok := errors.AsType[Error](err); ok {
+	if e, ok := FromError(err); ok {
 		return e
 	}
 	var syntaxErr *jsontext.SyntacticError

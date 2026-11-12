@@ -323,7 +323,7 @@ func TestRawWithHandlerValidation(t *testing.T) {
 	add := Raw(func(_ context.Context, p addParams) (addResult, error) {
 		if p.A < 0 || p.B < 0 {
 			return addResult{}, withData(NewError(CodeInvalidParams, "operands must be non-negative"),
-				map[string]any{"a": p.A, "b": p.B})
+				map[string]any{"a": p.A, "b": p.B}).Err()
 		}
 		return addResult{Sum: p.A + p.B}, nil
 	})
@@ -375,7 +375,7 @@ func TestRegisterMiddlewareRunsBeforeDecode(t *testing.T) {
 	requireAuth := func(next RawHandler) RawHandler {
 		return func(ctx context.Context, raw Params) (jsontext.Value, error) {
 			if ctx.Value(authKey{}) != "secret" {
-				return nil, NewError(CodeServerError, "unauthorized")
+				return nil, NewError(CodeServerError, "unauthorized").Err()
 			}
 			return next(ctx, raw)
 		}
@@ -817,7 +817,7 @@ func TestSetErrorHandlerSanitizesUnclassifiedErrors(t *testing.T) {
 	var logged error
 	s := NewServer()
 	s.SetErrorHandler(func(ctx context.Context, req Request, err error) Error {
-		if e, ok := errors.AsType[Error](err); ok {
+		if e, ok := FromError(err); ok {
 			return e
 		}
 		logged = err
@@ -876,7 +876,7 @@ func TestErrorHandlerSeesClassifiedErrors(t *testing.T) {
 	// json/v2 message can be replaced.
 	s := NewServer()
 	s.SetErrorHandler(func(_ context.Context, _ Request, err error) Error {
-		e, ok := errors.AsType[Error](err)
+		e, ok := FromError(err)
 		require.True(t, ok, "expected the component's Error, got %T", err)
 		return NewError(e.Code(), "invalid params")
 	})

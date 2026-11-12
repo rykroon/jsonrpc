@@ -113,8 +113,8 @@ func newID(gen func() ID) (ID, error) {
 // Call sends method with params (marshaled by NewParams) and decodes the reply
 // into result, unless result is nil. It returns the id it sent, zero if nothing
 // was sent. An empty method or a response with a different id is an error.
-// Server-reported errors are returned as Error; others are transport or decode
-// failures.
+// A server-reported error is returned as an error carrying the Error; recover
+// it with FromError. Other errors are transport or decode failures.
 func (c *Client) Call(ctx context.Context, method string, params any, result any) (ID, error) {
 	opts, gen := c.config()
 	if method == "" {
@@ -142,7 +142,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 		return id, fmt.Errorf("jsonrpc: response id %s does not match request id %s for call %q", resp.ID(), id, method)
 	}
 	if isErr {
-		return id, rpcErr
+		return id, rpcErr.Err()
 	}
 	return id, resp.DecodeResult(result, opts)
 }

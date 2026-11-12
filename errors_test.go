@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestErrorIsMatchesCode(t *testing.T) {
-	errNotFound := NewError(-32004, "not found")
+func TestErrIsMatchesCode(t *testing.T) {
+	errNotFound := NewError(-32004, "not found").Err()
 
-	require.ErrorIs(t, withData(NewError(-32004, "user 7 not found"), []int{7}), errNotFound)
+	require.ErrorIs(t, withData(NewError(-32004, "user 7 not found"), []int{7}).Err(), errNotFound)
 	require.ErrorIs(t, fmt.Errorf("lookup: %w", errNotFound), errNotFound)
-	require.NotErrorIs(t, NewError(-32005, "not found"), errNotFound)
+	require.NotErrorIs(t, NewError(-32005, "not found").Err(), errNotFound)
 	require.NotErrorIs(t, errors.New("not found"), errNotFound)
 
 	// A server error still matches after crossing the wire.
@@ -25,6 +25,41 @@ func TestErrorIsMatchesCode(t *testing.T) {
 	})
 	_, err := NewClient(s.Sender()).Call(context.Background(), "find", struct{}{}, nil)
 	require.ErrorIs(t, err, errNotFound)
+}
+
+func TestFromError(t *testing.T) {
+	e := withData(NewError(-32004, "not found"), []int{7})
+
+	got, ok := FromError(e.Err())
+	require.True(t, ok)
+	require.Equal(t, e, got, "Err round-trips through FromError unchanged")
+
+	got, ok = FromError(fmt.Errorf("lookup: %w", e.Err()))
+	require.True(t, ok, "FromError looks through %%w wrapping")
+	require.Equal(t, e, got)
+
+	_, ok = FromError(nil)
+	require.False(t, ok)
+	_, ok = FromError(errors.New("x"))
+	require.False(t, ok)
+
+	require.Equal(t, "jsonrpc: -32004 not found", e.Err().Error())
+}
+
+// Error holds its data as a string, so Errors compare with == and carried
+// errors compare with == without panicking.
+func TestErrorIsComparable(t *testing.T) {
+	a := withData(NewError(1, "x"), []int{1})
+	b := withData(NewError(1, "x"), []int{1})
+	require.True(t, a == b)
+	require.False(t, a == withData(NewError(1, "x"), []int{2}))
+
+	var errA, errB error = a.Err(), b.Err()
+	require.NotPanics(t, func() { _ = errA == errB })
+}
+
+func TestErrorDataAbsent(t *testing.T) {
+	require.Nil(t, NewError(1, "x").Data())
 }
 
 func TestErrorWithData(t *testing.T) {
@@ -121,8 +156,11 @@ func TestSentinelsMatchByCode(t *testing.T) {
 	s := NewServer()
 	c := NewClient(s.Sender())
 	_, err := c.Call(context.Background(), "missing", nil, nil)
-	require.ErrorIs(t, err, ErrMethodNotFound)
-	require.NotErrorIs(t, err, ErrInvalidParams)
+	e, ok := FromError(err)
+	require.True(t, ok)
+	require.Equal(t, CodeMethodNotFound, e.Code())
+	require.ErrorIs(t, err, ErrMethodNotFound.Err())
+	require.NotErrorIs(t, err, ErrInvalidParams.Err())
 }
 
 func TestErrorDecodeRequiresCodeAndMessage(t *testing.T) {

@@ -20,7 +20,7 @@ For IDs, on the client side, one should only ever be able to create a StringID()
 type Params struct {}
 
 type Error struct {}
-An Error should implement the error interface.
+An Error does not implement the error interface; it is data, like the other types. Error.Err() wraps it in an unexported type that does, and FromError(err) recovers it, as gRPC's status package does.
 
 
 # Architecture

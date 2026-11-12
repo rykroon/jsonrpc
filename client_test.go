@@ -85,8 +85,8 @@ func TestClientCallServerError(t *testing.T) {
 	_, err := c.Call(context.Background(), "fail", struct{}{}, nil)
 	require.Error(t, err)
 
-	var rpcErr Error
-	require.ErrorAs(t, err, &rpcErr)
+	rpcErr, ok := FromError(err)
+	require.True(t, ok)
 	require.Equal(t, -32001, rpcErr.Code())
 	require.Equal(t, "custom", rpcErr.Message())
 
@@ -249,14 +249,14 @@ func TestClientCallChecksResponseID(t *testing.T) {
 		_, err := respond(NewErrorResponse(NewError(CodeInternalError, "theirs"), StringID("1"))).
 			Call(context.Background(), "add", nil, nil)
 		require.ErrorContains(t, err, `response id "1" does not match request id 1`)
-		_, isRPC := errors.AsType[Error](err)
+		_, isRPC := FromError(err)
 		require.False(t, isRPC)
 	})
 
 	t.Run("a null id is accepted on an error", func(t *testing.T) {
 		_, err := respond(NewErrorResponse(NewError(CodeParseError, "bad"), ID{})).
 			Call(context.Background(), "add", nil, nil)
-		e, ok := errors.AsType[Error](err)
+		e, ok := FromError(err)
 		require.True(t, ok)
 		require.Equal(t, CodeParseError, e.Code())
 	})
@@ -302,8 +302,8 @@ func TestClientSetOptions(t *testing.T) {
 		var got tempResult
 		_, err := c.Call(context.Background(), "echo", tempParams{T: 21.5}, &got)
 		// The client marshals a bare number; the server's unmarshaler wants a string.
-		var e Error
-		require.ErrorAs(t, err, &e)
+		e, ok := FromError(err)
+		require.True(t, ok)
 		require.Equal(t, CodeInvalidParams, e.Code())
 	})
 
