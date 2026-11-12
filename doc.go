@@ -28,16 +28,18 @@
 // MarshalJSONTo, so every json.Unmarshal or json.Marshal of them, under v1 or
 // v2, gets the spec's checks.
 //
-// The decode enforces what the spec requires and no more: duplicate member
-// names anywhere are Invalid Request, while members the spec does not define
-// are ignored, in the envelope and inside params alike. Per the spec params must be structured when present, so P is a
-// struct or slice, never a scalar, and "params":null is rejected; a request
-// with no parameters omits the member, as NewParams(nil) does. NewParams holds
-// the sending side to the same rule, so a request the far end would reject is
-// not built in the first place.
+// The decode enforces what the spec requires and no more: members the spec
+// does not define are ignored, in the envelope and inside params alike.
+// Duplicate member names anywhere are Invalid Request under json/v2's
+// defaults, which the Server uses; encoding/json v1 accepts them. Per the spec
+// params must be structured when present, so P is a struct or slice, never a
+// scalar, and "params":null is rejected; a request with no parameters omits
+// the member, as NewParams(nil) does. NewParams holds the sending side to the
+// same rule, so a request the far end would reject is not built in the first
+// place.
 //
 // The response encode writes the canonical object — version, result or
-// error, id — and refuses one holding both members or neither.
+// error, id — and refuses the zero Response, which holds neither.
 //
 // # Options
 //
@@ -93,10 +95,10 @@
 //
 // Response is an immutable value for both shapes: exactly one of Result and
 // Error is set, and ID is always present. NewSuccessResponse and
-// NewErrorResponse normalize an empty result or id to JSON null. Marshal and
-// unmarshal both refuse a response holding both members or neither. The zero
-// Response means no response: Serve returns it for a notification, and
-// IsZero detects it.
+// NewErrorResponse normalize an empty result or id to JSON null. Unmarshal
+// refuses a response holding both members or neither, and marshal refuses the
+// zero Response. The zero Response means no response: Serve returns it for a
+// notification, and IsZero detects it.
 //
 // # Polymorphic fields
 //

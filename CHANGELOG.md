@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); while the major
 version is 0, minor releases may carry breaking changes.
 
-## [v0.6.0] — unreleased
+## [v0.6.0] — 2026-11-11
 
 A breaking release. Request ids and params get their own types, `ID` and
 `Params`, in place of `jsontext.Value`, and `Error`, `Request`, and
@@ -32,6 +32,7 @@ A breaking release. Request ids and params get their own types, `ID` and
 | `NewError(...) *Error` | `NewError(...) Error` |
 | `ErrorHandler func(...) *Error` | `ErrorHandler func(...) Error` |
 | `errors.AsType[*jsonrpc.Error](err)` | `errors.AsType[jsonrpc.Error](err)` |
+| `err == ErrNotFound` | `errors.Is(err, ErrNotFound)` |
 | `*Request` in `Serve`, `Sender`, `SenderFunc`, `ErrorHandler`, `Client.Send` | `Request` |
 | `req.Method`, `req.Params`, `req.ID`, `req.JSONRPC` | `req.Method()`, `req.Params()`, `req.ID()`, `req.JSONRPC()` |
 | `&Request{...}` | `NewRequest(...)` / `NewNotification(...)` |
@@ -111,6 +112,8 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   forbid them. Duplicate member names are still Invalid Request.
 - **An error object must have `code` and `message` to decode.** `"error":{}`
   in a response is now a decode error rather than an `Error` with code 0.
+  The code must be an integer and the message a string; `null` for either is
+  an error too.
 - `Client.Call` and `Notify` no longer double-prefix a params error: it reads
   `jsonrpc: params must be…` rather than `jsonrpc: marshal params: jsonrpc:
   params must be…`.
@@ -250,6 +253,6 @@ Removed, with no replacement needed:
 
 Earlier releases predate this changelog; see the git history.
 
-[v0.6.0]: https://github.com/rykroon/jsonrpc/compare/v0.5.0...HEAD
+[v0.6.0]: https://github.com/rykroon/jsonrpc/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/rykroon/jsonrpc/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/rykroon/jsonrpc/releases/tag/v0.4.0

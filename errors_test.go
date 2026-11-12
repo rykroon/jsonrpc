@@ -95,6 +95,9 @@ func TestErrorUnmarshalRejectsMalformed(t *testing.T) {
 		`{"code":1.5,"message":"x"}`,
 		`{"code":"1","message":"x"}`,
 		`{"code":1,"message":2}`,
+		`{"code":null,"message":"x"}`,
+		`{"code":1,"message":null}`,
+		`{"code":true,"message":"x"}`,
 		`{"code":1,"code":2,"message":"x"}`,
 	} {
 		e := withData(NewError(1, "keep"), 1)

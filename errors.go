@@ -74,8 +74,8 @@ func (e Error) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return enc.WriteToken(jsontext.EndObject)
 }
 
-// UnmarshalJSONFrom decodes one error object, which must have a code and a
-// message. Undefined members are skipped; duplicates are rejected. A failed
+// UnmarshalJSONFrom decodes one error object, which must have an integer code
+// and a string message. Undefined members are skipped; duplicates are rejected. A failed
 // decode leaves the receiver zeroed.
 func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	// json/v2 does not zero the destination.
@@ -99,12 +99,19 @@ func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 		}
 		switch tok.String() {
 		case "code":
+			// null would decode as 0 without complaint.
+			if d.PeekKind() != jsontext.KindNumber {
+				return errors.New("jsonrpc: error code must be an integer")
+			}
 			// An int, so the decoder rejects fractions and overflow.
 			if err := json.UnmarshalDecode(d, &out.code); err != nil {
 				return err
 			}
 			hasCode = true
 		case "message":
+			if d.PeekKind() != jsontext.KindString {
+				return errors.New("jsonrpc: error message must be a string")
+			}
 			if err := json.UnmarshalDecode(d, &out.message); err != nil {
 				return err
 			}
