@@ -145,10 +145,10 @@ s.SetErrorHandler(func(ctx context.Context, req jsonrpc.Request, err error) json
 The default sends a carried `Error` through untouched and reports anything
 else as an Internal error carrying the error's message.
 
-The spec's predefined errors are available as the `Error` values `ErrParse`,
-`ErrInvalidRequest`, `ErrMethodNotFound`, `ErrInvalidParams`, and
-`ErrInternal`. A caller tests what came back from `Client.Call` with
-`FromError`:
+The spec's predefined error codes are the constants `CodeParseError`,
+`CodeInvalidRequest`, `CodeMethodNotFound`, `CodeInvalidParams`, and
+`CodeInternalError`. A caller tests what came back from `Client.Call` with
+`FromError` and `Code`:
 
 ```go
 _, err := c.Call(ctx, "add", params, &sum)
@@ -157,8 +157,9 @@ if e, ok := jsonrpc.FromError(err); ok && e.Code() == jsonrpc.CodeMethodNotFound
 }
 ```
 
-Errors made by `Err()` also match each other by code under `errors.Is`, so
-`errors.Is(err, jsonrpc.ErrMethodNotFound.Err())` works too.
+Errors made by `Err()` also match each other by code under `errors.Is`, so an
+application error declared once — `var errNotFound = jsonrpc.NewError(-32004,
+"not found")` — is recognized with `errors.Is(err, errNotFound.Err())`.
 
 ## What it gives you
 

@@ -143,10 +143,6 @@ result stays `jsontext.Value`. A custom
 - **`Error.Err()` and `FromError(err)`** — convert between an `Error` and the
   `error` that carries it, in the manner of gRPC's `Status.Err` and
   `status.FromError`.
-- **`ErrParse`, `ErrInvalidRequest`, `ErrMethodNotFound`, `ErrInvalidParams`,
-  and `ErrInternal`** — the spec's predefined errors as `Error` values, with
-  the spec's messages. Return one with `.Err()`; recognize one with
-  `FromError` and `Code()`, or with `errors.Is(err, ErrMethodNotFound.Err())`.
 - **`Client.SetIDGenerator(func() ID)`** — replaces the default counter as the
   source of `Call`'s ids. `Call` refuses a zero, null, or fractional id from
   it without sending. Must be called before the first `Call` or `Notify`; nil

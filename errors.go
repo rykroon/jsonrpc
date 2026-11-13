@@ -7,6 +7,11 @@ import (
 	"fmt"
 )
 
+// The spec's predefined error codes. Recognize one with FromError and Code:
+//
+//	if e, ok := jsonrpc.FromError(err); ok && e.Code() == jsonrpc.CodeMethodNotFound {
+//		// the server has no such method
+//	}
 const (
 	CodeParseError     = -32700
 	CodeInvalidRequest = -32600
@@ -19,20 +24,6 @@ const (
 	// default.
 	CodeServerError    = -32000 // first (highest) server-defined code
 	CodeServerErrorMin = -32099 // last (lowest) server-defined code
-)
-
-// The spec's predefined errors, with its messages. Return one from a handler
-// with Err, and recognize one with FromError and Code:
-//
-//	if e, ok := jsonrpc.FromError(err); ok && e.Code() == jsonrpc.CodeMethodNotFound {
-//		// the server has no such method
-//	}
-var (
-	ErrParse          = NewError(CodeParseError, "Parse error")
-	ErrInvalidRequest = NewError(CodeInvalidRequest, "Invalid Request")
-	ErrMethodNotFound = NewError(CodeMethodNotFound, "Method not found")
-	ErrInvalidParams  = NewError(CodeInvalidParams, "Invalid params")
-	ErrInternal       = NewError(CodeInternalError, "Internal error")
 )
 
 // Error is the JSON-RPC error object. It is immutable data, like Request and
@@ -106,8 +97,7 @@ func (r *rpcError) Error() string {
 }
 
 // Is reports whether target carries an Error with the same code, so
-// errors.Is(err, jsonrpc.ErrMethodNotFound.Err()) matches whatever the message
-// or data.
+// errors.Is(err, errNotFound.Err()) matches whatever the message or data.
 func (r *rpcError) Is(target error) bool {
 	t, ok := target.(*rpcError)
 	return ok && t.e.code == r.e.code

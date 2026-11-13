@@ -151,15 +151,15 @@ func TestErrorDataDoesNotAlias(t *testing.T) {
 	require.Equal(t, `[1]`, string(e.Data()))
 }
 
-func TestSentinelsMatchByCode(t *testing.T) {
+func TestErrorsMatchByCode(t *testing.T) {
 	s := NewServer()
 	c := NewClient(s.Sender())
 	_, err := c.Call(context.Background(), "missing", nil, nil)
 	e, ok := FromError(err)
 	require.True(t, ok)
 	require.Equal(t, CodeMethodNotFound, e.Code())
-	require.ErrorIs(t, err, ErrMethodNotFound.Err())
-	require.NotErrorIs(t, err, ErrInvalidParams.Err())
+	require.ErrorIs(t, err, NewError(CodeMethodNotFound, "other message").Err())
+	require.NotErrorIs(t, err, NewError(CodeInvalidParams, e.Message()).Err())
 }
 
 func TestErrorDecodeRequiresCodeAndMessage(t *testing.T) {
