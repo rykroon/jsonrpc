@@ -57,6 +57,14 @@ func (e Error) Code() int { return e.code }
 // Message is the short description of the error.
 func (e Error) Message() string { return e.message }
 
+// Data returns a copy of the raw data, nil when absent.
+func (e Error) Data() jsontext.Value {
+	if e.data == "" {
+		return nil
+	}
+	return jsontext.Value(e.data)
+}
+
 // WithData returns a copy of e carrying data, marshaled to JSON under opts.
 func (e Error) WithData(data any, opts ...json.Options) (Error, error) {
 	b, err := json.Marshal(data, opts...)
@@ -65,14 +73,6 @@ func (e Error) WithData(data any, opts ...json.Options) (Error, error) {
 	}
 	e.data = string(b)
 	return e, nil
-}
-
-// Data returns a copy of the raw data, nil when absent.
-func (e Error) Data() jsontext.Value {
-	if e.data == "" {
-		return nil
-	}
-	return jsontext.Value(e.data)
 }
 
 // DecodeData unmarshals the data into into under opts. Absent data leaves into
