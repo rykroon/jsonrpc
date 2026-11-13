@@ -66,8 +66,9 @@ result stays `jsontext.Value`. A custom
   `Serve` and `Sender` return the zero `Response`, not nil, for a
   notification; check `IsZero()`.
 - **`Error` is a value type that no longer implements `error`.** It is the
-  JSON-RPC error object as data, like `Request` and `Response`, and is
-  comparable with `==`. `NewError`, `WithData`, `ErrorHandler`, and
+  JSON-RPC error object as data, like `Request` and `Response`, and is not
+  comparable with `==`: compare by `Code()`, or with `errors.Is` on its
+  `Err()`. `NewError`, `WithData`, `ErrorHandler`, and
   `DefaultErrorHandler` use `Error` instead of `*Error`. A handler or
   middleware reports one by returning `e.Err()`, an error of an unexported
   type; `FromError(err)` recovers the `Error` through any `%w` wrapping.

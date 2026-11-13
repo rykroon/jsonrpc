@@ -116,8 +116,9 @@ outside it — the `Request` is already built, and the envelope is the
 Everything that can fail returns a plain `error`, and every error a handler
 or middleware returns goes to the server's `ErrorHandler`.
 
-`jsonrpc.Error` is the error object as plain data — an immutable, comparable
-value — and does not implement `error`, much like gRPC's `status.Status`.
+`jsonrpc.Error` is the error object as plain data — an immutable value,
+compared by `Code()` rather than `==` — and does not implement `error`, much
+like gRPC's `status.Status`.
 `Err()` wraps it as one, and `jsonrpc.FromError` gets it back, looking through
 `%w` wrapping. Returning an `Error`'s `Err()` says you classified the failure
 yourself; anything else leaves that to the `ErrorHandler`:

@@ -46,16 +46,15 @@ func TestFromError(t *testing.T) {
 	require.Equal(t, "jsonrpc: -32004 not found", e.Err().Error())
 }
 
-// Error holds its data as a string, so Errors compare with == and carried
-// errors compare with == without panicking.
-func TestErrorIsComparable(t *testing.T) {
-	a := withData(NewError(1, "x"), []int{1})
-	b := withData(NewError(1, "x"), []int{1})
-	require.True(t, a == b)
-	require.False(t, a == withData(NewError(1, "x"), []int{2}))
-
-	var errA, errB error = a.Err(), b.Err()
-	require.NotPanics(t, func() { _ = errA == errB })
+// Decoding copies the data, so reusing the input buffer leaves it intact.
+func TestErrorDecodedDataDoesNotAlias(t *testing.T) {
+	in := []byte(`{"code":1,"message":"x","data":[1]}`)
+	var e Error
+	require.NoError(t, json.Unmarshal(in, &e))
+	for i := range in {
+		in[i] = ' '
+	}
+	require.Equal(t, `[1]`, string(e.Data()))
 }
 
 func TestErrorDataAbsent(t *testing.T) {

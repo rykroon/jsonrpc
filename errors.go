@@ -36,15 +36,14 @@ var (
 )
 
 // Error is the JSON-RPC error object. It is immutable data, like Request and
-// Response, and is comparable with ==. It does not implement error: Err wraps it
-// as one, and FromError recovers it, as gRPC's status package does. Build one
-// with NewError and WithData, and read it through its accessors.
+// Response. It does not implement error: Err wraps it as one, and FromError
+// recovers it, as gRPC's status package does. Build one with NewError and
+// WithData, and read it through its accessors. Compare errors by Code, or with
+// errors.Is on their Err; Error is not comparable with ==.
 type Error struct {
 	code    int
 	message string
-	// data is the optional raw JSON, "" when absent. A string keeps Error
-	// comparable and its bytes unshared.
-	data string
+	data    jsontext.Value // raw JSON, nil when absent
 }
 
 func NewError(code int, message string) Error {
@@ -59,10 +58,7 @@ func (e Error) Message() string { return e.message }
 
 // Data returns a copy of the raw data, nil when absent.
 func (e Error) Data() jsontext.Value {
-	if e.data == "" {
-		return nil
-	}
-	return jsontext.Value(e.data)
+	return e.data.Clone()
 }
 
 // WithData returns a copy of e carrying data, marshaled to JSON under opts.
@@ -71,17 +67,17 @@ func (e Error) WithData(data any, opts ...json.Options) (Error, error) {
 	if err != nil {
 		return Error{}, err
 	}
-	e.data = string(b)
+	e.data = b
 	return e, nil
 }
 
 // DecodeData unmarshals the data into into under opts. Absent data leaves into
 // untouched.
 func (e Error) DecodeData(into any, opts ...json.Options) error {
-	if e.data == "" {
+	if len(e.data) == 0 {
 		return nil
 	}
-	return json.Unmarshal([]byte(e.data), into, opts...)
+	return json.Unmarshal(e.data, into, opts...)
 }
 
 // Err returns e as an error, for returning from a Handler, RawHandler, or
@@ -139,11 +135,11 @@ func (e Error) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if err := enc.WriteToken(jsontext.String(e.message)); err != nil {
 		return err
 	}
-	if e.data != "" {
+	if len(e.data) > 0 {
 		if err := enc.WriteToken(jsontext.String("data")); err != nil {
 			return err
 		}
-		if err := enc.WriteValue(jsontext.Value(e.data)); err != nil {
+		if err := enc.WriteValue(e.data); err != nil {
 			return err
 		}
 	}
@@ -197,8 +193,8 @@ func (e *Error) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 			if err != nil {
 				return err
 			}
-			// The conversion copies ReadValue's buffer, which dies at the next read.
-			out.data = string(val)
+			// Copy ReadValue's buffer, which the next read reuses.
+			out.data = val.Clone()
 		default:
 			if err := d.SkipValue(); err != nil {
 				return err
