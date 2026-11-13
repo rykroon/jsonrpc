@@ -48,7 +48,7 @@ func TestNotificationUnknownMethodProducesNoResponse(t *testing.T) {
 
 func TestNilResultEncodesAsNull(t *testing.T) {
 	s := NewServer()
-	s.RegisterRaw("void", func(_ context.Context, _ Params) (jsontext.Value, error) {
+	s.RegisterRaw("void", func(_ context.Context, _ Request) (jsontext.Value, error) {
 		return nil, nil
 	})
 
@@ -358,11 +358,59 @@ func TestRawWithHandlerValidation(t *testing.T) {
 // letting tests assert ordering of the wrapping.
 func tagMiddleware(name string, log *[]string) Middleware {
 	return func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw Params) (jsontext.Value, error) {
+		return func(ctx context.Context, req Request) (jsontext.Value, error) {
 			*log = append(*log, name)
-			return next(ctx, raw)
+			return next(ctx, req)
 		}
 	}
+}
+
+func TestMiddlewareSeesRequest(t *testing.T) {
+	type seen struct {
+		method string
+		id     ID
+		notif  bool
+		params string
+	}
+	var got []seen
+	s := NewServer()
+	s.Use(func(next RawHandler) RawHandler {
+		return func(ctx context.Context, req Request) (jsontext.Value, error) {
+			got = append(got, seen{req.Method(), req.ID(), req.IsNotification(), req.Params().String()})
+			return next(ctx, req)
+		}
+	})
+	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
+		return addResult{Sum: p.A + p.B}, nil
+	})
+	s.Register("ping", func(context.Context, struct{}) (any, error) { return nil, nil })
+
+	resp := s.Serve(context.Background(), NewRequest("add", mustParams(t, addParams{A: 2, B: 3}), StringID("a")))
+	require.Equal(t, StringID("a"), resp.ID())
+	require.True(t, s.Serve(context.Background(), NewNotification("ping", Params{})).IsZero())
+
+	require.Equal(t, []seen{
+		{"add", StringID("a"), false, `{"a":2,"b":3}`},
+		{"ping", ID{}, true, ""},
+	}, got)
+}
+
+func TestMiddlewareReplacementRequestDoesNotChangeResponseID(t *testing.T) {
+	s := NewServer()
+	s.Use(func(next RawHandler) RawHandler {
+		return func(ctx context.Context, req Request) (jsontext.Value, error) {
+			return next(ctx, NewRequest(req.Method(), req.Params(), IntID(99)))
+		}
+	})
+	var handlerID ID
+	s.RegisterRaw("echo", func(_ context.Context, req Request) (jsontext.Value, error) {
+		handlerID = req.ID()
+		return jsontext.Value(`true`), nil
+	})
+
+	resp := s.Serve(context.Background(), NewRequest("echo", Params{}, IntID(1)))
+	require.Equal(t, IntID(99), handlerID)
+	require.Equal(t, IntID(1), resp.ID())
 }
 
 type authKey struct{}
@@ -373,11 +421,11 @@ func TestRegisterMiddlewareRunsBeforeDecode(t *testing.T) {
 	// decoding into P — the concern middleware is for, now that params
 	// validation belongs to the handler.
 	requireAuth := func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw Params) (jsontext.Value, error) {
+		return func(ctx context.Context, req Request) (jsontext.Value, error) {
 			if ctx.Value(authKey{}) != "secret" {
 				return nil, NewError(CodeServerError, "unauthorized").Err()
 			}
-			return next(ctx, raw)
+			return next(ctx, req)
 		}
 	}
 	s.Register("add", func(_ context.Context, p addParams) (addResult, error) {
@@ -428,7 +476,7 @@ func TestRegisterRejectsEmptyName(t *testing.T) {
 		s.Register("", func(context.Context, struct{}) (int, error) { return 1, nil })
 	})
 	require.Panics(t, func() {
-		s.RegisterRaw("", func(context.Context, Params) (jsontext.Value, error) { return nil, nil })
+		s.RegisterRaw("", func(context.Context, Request) (jsontext.Value, error) { return nil, nil })
 	})
 }
 
@@ -605,8 +653,8 @@ func TestDefaultDecoderOmittedParams(t *testing.T) {
 	s := NewServer()
 	var seen Params
 	called := false
-	s.RegisterRaw("probe", func(_ context.Context, params Params) (jsontext.Value, error) {
-		seen, called = params, true
+	s.RegisterRaw("probe", func(_ context.Context, req Request) (jsontext.Value, error) {
+		seen, called = req.Params(), true
 		return jsontext.Value(`"ok"`), nil
 	})
 
@@ -976,8 +1024,8 @@ func TestMiddlewareCanWrapErrors(t *testing.T) {
 		return DefaultErrorHandler(ctx, req, err)
 	})
 	s.Use(func(next RawHandler) RawHandler {
-		return func(ctx context.Context, raw Params) (jsontext.Value, error) {
-			out, err := next(ctx, raw)
+		return func(ctx context.Context, req Request) (jsontext.Value, error) {
+			out, err := next(ctx, req)
 			if err != nil {
 				return nil, fmt.Errorf("lookup: %w", err)
 			}
@@ -1015,7 +1063,7 @@ func TestSetErrorHandlerPanics(t *testing.T) {
 
 func TestServeRejectsInvalidResult(t *testing.T) {
 	s := NewServer()
-	s.RegisterRaw("bad", func(context.Context, Params) (jsontext.Value, error) {
+	s.RegisterRaw("bad", func(context.Context, Request) (jsontext.Value, error) {
 		return jsontext.Value(`{"a":`), nil
 	})
 

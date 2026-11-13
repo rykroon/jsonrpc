@@ -6,7 +6,8 @@
 //
 //   - Server.Register installs a Handler — func(context.Context, P) (R, error)
 //     — under a method name. This is the normal way to write a method.
-//   - Server.RegisterRaw installs a RawHandler, working on undecoded Params.
+//   - Server.RegisterRaw installs a RawHandler, which receives the Request
+//     with its Params undecoded.
 //   - Server.SetErrorHandler decides what every failure looks like on the wire.
 //   - Server.Serve dispatches one decoded Request. Server.ServeMessage parses
 //     raw bytes first, batches included, for transports like WebSocket or
@@ -14,7 +15,8 @@
 //
 // Middleware — func(RawHandler) RawHandler — is passed per method or
 // server-wide via Server.Use, and works on the raw layer so one middleware
-// serves typed and raw methods alike. Raw is Register's typed pipeline as a
+// serves typed and raw methods alike. It sees the whole Request, so
+// server-wide middleware can tell methods, ids, and notifications apart. Raw is Register's typed pipeline as a
 // free function, so a pre-decode hook such as schema validation is Middleware
 // around Raw(fn).
 //

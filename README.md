@@ -46,15 +46,15 @@ func main() {
 
 Cross-cutting concerns — auth, logging, validation — are written once as
 `Middleware` (`func(RawHandler) RawHandler`) and composed with handlers.
-Because middleware works on undecoded `Params`, it layers cleanly over typed
-handlers without touching the typed pipeline:
+Middleware sees the decoded `Request` with its `Params` still undecoded, so it
+layers cleanly over typed handlers without touching the typed pipeline:
 
 ```go
 // logging knows nothing about any handler's param or result types.
 func logging(next jsonrpc.RawHandler) jsonrpc.RawHandler {
-    return func(ctx context.Context, params jsonrpc.Params) (jsontext.Value, error) {
-        log.Printf("rpc params: %s", params)
-        out, err := next(ctx, params)
+    return func(ctx context.Context, req jsonrpc.Request) (jsontext.Value, error) {
+        log.Printf("rpc %s params: %s", req.Method(), req.Params())
+        out, err := next(ctx, req)
         if err != nil {
             return nil, fmt.Errorf("rpc: %w", err) // wrapping survives to the ErrorHandler
         }
@@ -163,7 +163,8 @@ Errors made by `Err()` also match each other by code under `errors.Is`, so
 
 - `Server` — a method registry. `Register` installs a `Handler`
   (`func(ctx, P) (R, error)`), the normal way to write a method;
-  `RegisterRaw` installs a `RawHandler` working on undecoded `Params`.
+  `RegisterRaw` installs a `RawHandler`, which receives the `Request` with
+  its `Params` undecoded.
 - `Middleware` / `Server.Use` — compose auth, logging, and validation
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params

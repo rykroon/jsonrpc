@@ -108,14 +108,15 @@ func ExampleClient_Send() {
 }
 
 // ExampleMiddleware composes a cross-cutting concern with a typed handler. The
-// middleware operates on undecoded Params, so it never touches the typed pipeline.
+// middleware sees the Request with its Params undecoded, so it never touches
+// the typed pipeline.
 func ExampleMiddleware() {
 	// logging knows nothing about the handler's parameter or result types. The
 	// returned func literal converts to RawHandler with no cast.
 	logging := func(next jsonrpc.RawHandler) jsonrpc.RawHandler {
-		return func(ctx context.Context, params jsonrpc.Params) (jsontext.Value, error) {
-			fmt.Printf("calling with params: %s\n", params)
-			return next(ctx, params)
+		return func(ctx context.Context, req jsonrpc.Request) (jsontext.Value, error) {
+			fmt.Printf("calling %s with params: %s\n", req.Method(), req.Params())
+			return next(ctx, req)
 		}
 	}
 
@@ -132,7 +133,7 @@ func ExampleMiddleware() {
 	out, _ := s.ServeMessage(context.Background(), in)
 	fmt.Println(string(out))
 	// Output:
-	// calling with params: {"a":2,"b":3}
+	// calling add with params: {"a":2,"b":3}
 	// {"jsonrpc":"2.0","result":5,"id":1}
 }
 

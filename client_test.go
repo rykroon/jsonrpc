@@ -320,8 +320,8 @@ func TestClientSetOptions(t *testing.T) {
 	t.Run("the options reach the params Notify marshals", func(t *testing.T) {
 		var seen Params
 		s := NewServer()
-		s.RegisterRaw("note", func(_ context.Context, params Params) (jsontext.Value, error) {
-			seen = params
+		s.RegisterRaw("note", func(_ context.Context, req Request) (jsontext.Value, error) {
+			seen = req.Params()
 			return nil, nil
 		})
 		c := NewClient(s.Sender())

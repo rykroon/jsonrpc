@@ -11,9 +11,9 @@ import (
 // Invalid params. Other errors pass through. Use it with Server.RegisterRaw to
 // give one method its own options.
 func Raw[P, R any](fn Handler[P, R], opts ...json.Options) RawHandler {
-	return func(ctx context.Context, params Params) (jsontext.Value, error) {
+	return func(ctx context.Context, req Request) (jsontext.Value, error) {
 		var p P
-		if err := params.Decode(&p, opts...); err != nil {
+		if err := req.Params().Decode(&p, opts...); err != nil {
 			return nil, NewError(CodeInvalidParams, err.Error()).Err()
 		}
 		r, err := fn(ctx, p)

@@ -21,7 +21,7 @@ are used by value; and `Error` becomes plain data that no longer implements
 | `NewID("abc")`, `MustNewID("abc")` | `StringID("abc")` |
 | `NewID(n)`, `MustNewID(n)` | `IntID(n)` |
 | `NewParams(v) (jsontext.Value, error)` | `NewParams(v) (Params, error)` |
-| `RawHandler func(ctx, jsontext.Value) (jsontext.Value, error)` | `RawHandler func(ctx, Params) (jsontext.Value, error)` |
+| `RawHandler func(ctx, jsontext.Value) (jsontext.Value, error)` | `RawHandler func(ctx, Request) (jsontext.Value, error)`; read params with `req.Params()` |
 | `string(req.ID)`, `string(req.Params)` | `req.ID.String()`, `req.Params.String()` |
 | `len(req.ID) == 0` | `req.ID.IsZero()` |
 | `nil` params or id in a constructor | `Params{}` / `ID{}` |
@@ -48,8 +48,9 @@ are used by value; and `Error` becomes plain data that no longer implements
 
 `StringID` and `IntID` cannot fail, so the error handling around `NewID`
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
-`params.String()`, decode with `params.Decode`, and build replacement
-params with `NewParams`; the result stays `jsontext.Value`. A custom
+`req.Params().String()`, decode with `req.Params().Decode`, and pass
+replacement params on with `NewRequest(req.Method(), p, req.ID())`; the
+result stays `jsontext.Value`. A custom
 `*Request` unmarshaler or `*Response` marshaler installed through
 `Server.SetOptions` no longer has any effect; see below.
 
@@ -98,10 +99,15 @@ params with `NewParams`; the result stays `jsontext.Value`. A custom
   Decoded string ids are re-escaped minimally so differently escaped ids
   match; numbers are kept verbatim. `String` returns the JSON form, so `"1"`
   and `1` stay distinct.
-- **`Params` replaces `jsontext.Value` params**, in `Request` and in
-  `RawHandler`, so middleware sees params already checked to be an object or
-  array, or absent. A `jsontext.Value` passed to `NewParams` is now validated
-  rather than passed through unchecked.
+- **`Params` replaces `jsontext.Value` params** in `Request`, so middleware
+  sees params already checked to be an object or array, or absent. A
+  `jsontext.Value` passed to `NewParams` is now validated rather than passed
+  through unchecked.
+- **`RawHandler` receives the `Request`, not just its params.** Middleware,
+  server-wide middleware included, can now see the method, the id, and
+  whether the call is a notification. Dispatch and the response id still come
+  from the request `Serve` received; a `Request` a middleware passes to `next`
+  changes only what the handlers after it see.
 - **`Client.Call` checks the response id.** A response whose id differs from
   the request's is an error rather than a result, so a misbehaving `Sender` or
   server cannot hand one call another's reply. A null id is still accepted on

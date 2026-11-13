@@ -12,10 +12,13 @@ import (
 // Handler is a typed method: decoded params P in, result R or an error out.
 type Handler[P, R any] func(context.Context, P) (R, error)
 
-// RawHandler takes undecoded params (zero when absent) and returns result
-// bytes or an error. A nil result is sent as null; a result that is not valid
-// JSON is an error. Every error goes to the ErrorHandler.
-type RawHandler func(ctx context.Context, params Params) (jsontext.Value, error)
+// RawHandler takes the request, its params still undecoded, and returns result
+// bytes or an error. The request has passed the server's checks: the version is
+// "2.0" and the method is registered. Dispatch and the response id come from
+// the request Serve received, so a Request a middleware passes to next changes
+// only what the handlers after it see. A nil result is sent as null; a result
+// that is not valid JSON is an error. Every error goes to the ErrorHandler.
+type RawHandler func(ctx context.Context, req Request) (jsontext.Value, error)
 
 // Middleware wraps a RawHandler. mw[0] is outermost.
 type Middleware func(next RawHandler) RawHandler
@@ -159,7 +162,7 @@ func (s *Server) Serve(ctx context.Context, req Request) Response {
 		return NewErrorResponse(s.handleError(ctx, req, NewError(CodeMethodNotFound, "method not found: "+req.Method()).Err()), id)
 	}
 
-	result, err := h(ctx, req.Params())
+	result, err := h(ctx, req)
 	// A result that is not JSON could not be marshaled into a response, so it
 	// is the handler's failure, reported like any other.
 	if err == nil && len(result) > 0 && !result.IsValid() {
