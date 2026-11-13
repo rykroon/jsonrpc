@@ -60,6 +60,11 @@ func (p Params) String() string {
 	return string(p.value)
 }
 
+// Bytes returns a copy of the params' JSON, nil when absent.
+func (p Params) Bytes() jsontext.Value {
+	return p.value.Clone()
+}
+
 // Decode unmarshals the params into into under opts. Absent params leave into
 // untouched, as typed handlers do.
 func (p Params) Decode(into any, opts ...json.Options) error {

@@ -117,10 +117,11 @@
 // ==. Register and Raw decode params and results for you.
 //
 // The two the spec does constrain have their own types. Params holds an
-// object or array, or is zero when absent; NewParams enforces the shape. ID
-// holds a string, number, or null as its JSON encoding, so ids compare with ==
-// and work as map keys; StringID and IntID cannot fail. A zero ID is
-// how IsNotification decides.
+// object or array, or is zero when absent; NewParams enforces the shape, and
+// Params.Bytes, like Result and Data, returns a copy. ID holds a string,
+// number, or null as its JSON encoding, so ids compare with == and work as map
+// keys; StringID and IntID cannot fail. A zero ID is how IsNotification
+// decides.
 //
 // # Not included
 //

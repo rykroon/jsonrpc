@@ -48,7 +48,7 @@ are used by value; and `Error` becomes plain data that no longer implements
 
 `StringID` and `IntID` cannot fail, so the error handling around `NewID`
 goes away. In a `RawHandler` or `Middleware`, read the bytes with
-`req.Params().String()`, decode with `req.Params().Decode`, and pass
+`req.Params().Bytes()`, decode with `req.Params().Decode`, and pass
 replacement params on with `NewRequest(req.Method(), p, req.ID())`; the
 result stays `jsontext.Value`. A custom
 `*Request` unmarshaler or `*Response` marshaler installed through
@@ -157,7 +157,8 @@ result stays `jsontext.Value`. A custom
   `DecodeData`, so error data can use the same wire form as results.
 - **`ID`** — `StringID`, `IntID`, `IsZero`, `IsNull`, `String`, and its own
   `MarshalJSONTo` / `UnmarshalJSONFrom`.
-- **`Params`** — `IsObject`, `IsArray`, `IsZero`, `String`, `Decode`,
+- **`Params`** — `IsObject`, `IsArray`, `IsZero`, `String`, `Bytes` (a
+  copy), `Decode`,
   `Map` and `Slice` (members left undecoded, so numbers are not rounded), and
   its own `MarshalJSONTo` / `UnmarshalJSONFrom`.
 

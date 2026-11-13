@@ -28,6 +28,18 @@ func TestParamsKinds(t *testing.T) {
 	require.Equal(t, "", zero.String())
 }
 
+func TestParamsBytes(t *testing.T) {
+	obj := mustParams(t, jsontext.Value(`{"a":1}`))
+	require.Equal(t, jsontext.Value(`{"a":1}`), obj.Bytes())
+	require.Equal(t, jsontext.Value(`[1,2]`), mustParams(t, []int{1, 2}).Bytes())
+	require.Nil(t, Params{}.Bytes())
+
+	// A copy: changing it leaves the params alone.
+	b := obj.Bytes()
+	b[0] = 'X'
+	require.Equal(t, `{"a":1}`, obj.String())
+}
+
 func TestParamsDecode(t *testing.T) {
 	t.Run("decodes", func(t *testing.T) {
 		var got addParams
