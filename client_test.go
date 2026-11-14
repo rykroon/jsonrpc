@@ -229,6 +229,16 @@ func TestClientNotify(t *testing.T) {
 	<-called
 }
 
+// A transport that hands back no response to a call breaks the protocol.
+func TestClientCallRejectsNoResponse(t *testing.T) {
+	c := NewClient(SenderFunc(func(context.Context, Request) (Response, error) {
+		return Response{}, nil
+	}))
+	_, err := c.Call(context.Background(), "add", nil, nil)
+	require.ErrorIs(t, err, ErrInvalidResponse)
+	require.ErrorContains(t, err, `no response for call "add"`)
+}
+
 // Call must not decode another request's response as its own.
 func TestClientCallChecksResponseID(t *testing.T) {
 	respond := func(resp Response) *Client {
@@ -241,14 +251,16 @@ func TestClientCallChecksResponseID(t *testing.T) {
 		got := addResult{Sum: -1}
 		_, err := respond(NewSuccessResponse(jsontext.Value(`{"sum":5}`), IntID(99))).
 			Call(context.Background(), "add", nil, &got)
-		require.ErrorContains(t, err, "response id 99 does not match request id 1")
+		require.ErrorIs(t, err, ErrInvalidResponse)
+		require.ErrorContains(t, err, "id 99 does not match request id 1")
 		require.Equal(t, addResult{Sum: -1}, got)
 	})
 
 	t.Run("a mismatched error is not reported as the server's", func(t *testing.T) {
 		_, err := respond(NewErrorResponse(NewError(CodeInternalError, "theirs"), StringID("1"))).
 			Call(context.Background(), "add", nil, nil)
-		require.ErrorContains(t, err, `response id "1" does not match request id 1`)
+		require.ErrorIs(t, err, ErrInvalidResponse)
+		require.ErrorContains(t, err, `id "1" does not match request id 1`)
 		_, isRPC := FromError(err)
 		require.False(t, isRPC)
 	})
@@ -264,7 +276,8 @@ func TestClientCallChecksResponseID(t *testing.T) {
 	t.Run("but not on a success", func(t *testing.T) {
 		_, err := respond(NewSuccessResponse(jsontext.Value(`1`), ID{})).
 			Call(context.Background(), "add", nil, nil)
-		require.ErrorContains(t, err, "response id null does not match")
+		require.ErrorIs(t, err, ErrInvalidResponse)
+		require.ErrorContains(t, err, "id null does not match")
 	})
 }
 

@@ -110,7 +110,8 @@ result stays `jsontext.Value`. A custom
   from the request `Serve` received; a `Request` a middleware passes to `next`
   changes only what the handlers after it see.
 - **`Client.Call` checks the response id.** A response whose id differs from
-  the request's is an error rather than a result, so a misbehaving `Sender` or
+  the request's is an error wrapping `ErrInvalidResponse` rather than a
+  result, so a misbehaving `Sender` or
   server cannot hand one call another's reply. A null id is still accepted on
   an error response, since that is how a server says it could not read the id.
 - **A request whose id is not a string, number, or null fails to decode** as
@@ -140,6 +141,14 @@ result stays `jsontext.Value`. A custom
 
 ### Added
 
+- **`ErrInvalidResponse`** — wrapped by every failure where a reply is valid
+  JSON but not a valid response to the call: decoding a `Response` (no id,
+  both or neither of result and error, a wrong version, duplicate members,
+  …), `DecodeResponses` given something other than an array, and
+  `Client.Call` receiving no response or one with another request's id. Match
+  it with `errors.Is`. Malformed JSON is still reported as a
+  `*jsontext.SyntacticError`, so a caller can tell a broken server from a
+  broken connection.
 - **`Error.Err()` and `FromError(err)`** — convert between an `Error` and the
   `error` that carries it, in the manner of gRPC's `Status.Err` and
   `status.FromError`.

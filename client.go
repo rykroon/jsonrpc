@@ -10,9 +10,11 @@ import (
 )
 
 // Sender round-trips a Request to a Response across a transport. The error
-// return is for transport failures only; errors reported by the server appear
-// in Response.Error. For notifications the Response is ignored and should be
-// zero.
+// return is for transport failures and for replies that cannot be decoded:
+// malformed JSON as a syntax error, and anything else that is not a response
+// wrapping ErrInvalidResponse, which decoding into a Response does for you.
+// Errors reported by the server appear in Response.Error. For notifications
+// the Response is ignored and should be zero.
 type Sender interface {
 	Send(ctx context.Context, req Request) (Response, error)
 }
@@ -112,9 +114,11 @@ func newID(gen func() ID) (ID, error) {
 
 // Call sends method with params (marshaled by NewParams) and decodes the reply
 // into result, unless result is nil. It returns the id it sent, zero if nothing
-// was sent. An empty method or a response with a different id is an error.
-// A server-reported error is returned as an error carrying the Error; recover
-// it with FromError. Other errors are transport or decode failures.
+// was sent. A server-reported error is returned as an error carrying the
+// Error; recover it with FromError. A reply that is not a valid response to
+// this call (no response, a different id, or not a response object) wraps
+// ErrInvalidResponse. Other errors are transport failures, malformed JSON, an
+// empty method, or a result that does not decode into result.
 func (c *Client) Call(ctx context.Context, method string, params any, result any) (ID, error) {
 	opts, gen := c.config()
 	if method == "" {
@@ -133,13 +137,13 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 		return id, err
 	}
 	if resp.IsZero() {
-		return id, fmt.Errorf("jsonrpc: transport returned no response for call %q", method)
+		return id, invalidResponse("no response for call %q", method)
 	}
 	// Another call's result must not decode as this one's. A null id is
 	// allowed on an error: the server could not read ours.
 	rpcErr, isErr := resp.Error()
 	if resp.ID() != id && !(resp.ID().IsNull() && isErr) {
-		return id, fmt.Errorf("jsonrpc: response id %s does not match request id %s for call %q", resp.ID(), id, method)
+		return id, invalidResponse("id %s does not match request id %s for call %q", resp.ID(), id, method)
 	}
 	if isErr {
 		return id, rpcErr.Err()

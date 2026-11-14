@@ -171,7 +171,9 @@ application error declared once — `var errNotFound = jsonrpc.NewError(-32004,
   around handlers (per-method or server-wide).
 - `Client.Call` / `Client.Notify` — one-line method calls with params
   marshaling, id generation, and result decoding; a server error comes back
-  as an `error` that `FromError` turns into an `Error`. `Call` returns the id it sent, and `Client.SetIDGenerator`
+  as an `error` that `FromError` turns into an `Error`, and a reply that is
+  valid JSON but not a valid response wraps `ErrInvalidResponse`. `Call`
+  returns the id it sent, and `Client.SetIDGenerator`
   replaces the default counter with your own id scheme. `Client.Send` is the
   low-level escape hatch, round-tripping a `Request` through a `Sender`
   (in-process, HTTP, WebSocket, etc.).

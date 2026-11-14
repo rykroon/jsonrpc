@@ -247,8 +247,7 @@ func classifyDecodeError(err error) Error {
 	if e, ok := FromError(err); ok {
 		return e
 	}
-	var syntaxErr *jsontext.SyntacticError
-	if errors.As(err, &syntaxErr) && !errors.Is(err, jsontext.ErrDuplicateName) {
+	if isSyntaxError(err) {
 		return NewError(CodeParseError, err.Error())
 	}
 	// Drop json/v2's *SemanticError framing; the client wants the cause.

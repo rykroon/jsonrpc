@@ -2,6 +2,8 @@ package jsonrpchttp_test
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -189,4 +191,37 @@ func TestClientCallOverHTTP(t *testing.T) {
 	_, err := client.Call(context.Background(), "addOne", addOneParams{N: 7}, &result)
 	require.NoError(t, err)
 	assert.Equal(t, 8, result)
+}
+
+// A 200 reply whose body is valid JSON but not a response wraps
+// ErrInvalidResponse; a body that is not JSON stays a syntax error.
+func TestSenderClassifiesBadBodies(t *testing.T) {
+	serve := func(body string) *jsonrpc.Client {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, body)
+		}))
+		t.Cleanup(ts.Close)
+		return jsonrpc.NewClient(&jsonrpchttp.Sender{URL: ts.URL})
+	}
+
+	_, err := serve(`{"jsonrpc":"2.0","id":1}`).Call(context.Background(), "addOne", nil, nil)
+	require.ErrorIs(t, err, jsonrpc.ErrInvalidResponse)
+
+	_, err = serve(`<html>oops</html>`).Call(context.Background(), "addOne", nil, nil)
+	require.NotErrorIs(t, err, jsonrpc.ErrInvalidResponse)
+	_, isSyntax := errors.AsType[*jsontext.SyntacticError](err)
+	require.True(t, isSyntax, "%v", err)
+}
+
+// A 204 to a call leaves the client with no response.
+func TestSenderNoContentForCallIsInvalidResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	client := jsonrpc.NewClient(&jsonrpchttp.Sender{URL: ts.URL})
+
+	_, err := client.Call(context.Background(), "addOne", nil, nil)
+	require.ErrorIs(t, err, jsonrpc.ErrInvalidResponse)
 }

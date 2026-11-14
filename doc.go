@@ -96,6 +96,11 @@
 // Client.Call marshals params, sends, and decodes the result, returning
 // a server-reported error as an error FromError recovers the Error from;
 // Client.Notify sends a notification.
+//
+// A reply that is valid JSON but not a valid response to the call (not a
+// response object, no response at all, or another request's id) wraps
+// ErrInvalidResponse; match it with errors.Is. Malformed JSON stays a
+// *jsontext.SyntacticError, and anything else is the transport's own error.
 // Client.SetOptions gives both the same json/v2 options the server uses. For
 // full control build a Request with NewRequest or NewNotification and send it
 // with Client.Send.

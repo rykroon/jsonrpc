@@ -125,8 +125,9 @@ func (r Response) MarshalJSONTo(enc *jsontext.Encoder) error {
 
 // UnmarshalJSONFrom decodes one response object, checking the version, the
 // presence of an id, and that exactly one of result and error is set.
-// Undefined members are skipped; duplicates are rejected. A failed check
-// leaves the receiver zeroed. Use DecodeResponses for a batch reply.
+// Undefined members are skipped. Malformed JSON is a syntax error; every other
+// failure, duplicate members included, wraps ErrInvalidResponse. A failed
+// check leaves the receiver zeroed. Use DecodeResponses for a batch reply.
 func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	// json/v2 does not zero the destination.
 	*r = Response{}
@@ -136,7 +137,7 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 		return decodeResponseError(err)
 	}
 	if tok.Kind() != jsontext.KindBeginObject {
-		return errors.New("jsonrpc: response must be a JSON object")
+		return invalidResponse("must be a JSON object")
 	}
 
 	// The receiver is replaced only once the checks pass.
@@ -156,7 +157,7 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 				return decodeResponseError(err)
 			}
 			if tok.Kind() != jsontext.KindString {
-				return errors.New("jsonrpc: response jsonrpc must be a string")
+				return invalidResponse("jsonrpc must be a string")
 			}
 			resp.jsonrpc = tok.String()
 
@@ -200,33 +201,41 @@ func (r *Response) UnmarshalJSONFrom(d *jsontext.Decoder) error {
 	}
 
 	if resp.jsonrpc != Version {
-		return fmt.Errorf("jsonrpc: response jsonrpc must be %q, got %q", Version, resp.jsonrpc)
+		return invalidResponse("jsonrpc must be %q, got %q", Version, resp.jsonrpc)
 	}
 	if resp.id.IsZero() {
-		return errors.New("jsonrpc: response has no id")
+		return invalidResponse("no id")
 	}
 	switch {
 	case resp.result != nil && hasError:
-		return errors.New("jsonrpc: response has both result and error")
+		return invalidResponse("both result and error")
 	case resp.result == nil && !hasError:
-		return errors.New("jsonrpc: response has neither result nor error")
+		return invalidResponse("neither result nor error")
 	}
 	*r = resp
 	return nil
 }
 
-// decodeResponseError stays a plain error: a malformed reply has no one to
-// report a spec code to.
+// decodeResponseError passes malformed JSON through as a syntax error and
+// reports anything else, such as a bad id or error object, as
+// ErrInvalidResponse.
 func decodeResponseError(err error) error {
-	return fmt.Errorf("jsonrpc: decode response: %w", err)
+	if isSyntaxError(err) {
+		return fmt.Errorf("jsonrpc: decode response: %w", err)
+	}
+	return invalidResponse("%w", err)
 }
 
 // DecodeResponses parses a batch reply element by element, giving each
-// Response.UnmarshalJSONFrom's checks.
+// Response.UnmarshalJSONFrom's checks. A reply that is valid JSON but not an
+// array wraps ErrInvalidResponse.
 func DecodeResponses(data jsontext.Value) ([]Response, error) {
 	var elems []jsontext.Value
 	if err := json.Unmarshal(data, &elems); err != nil {
-		return nil, fmt.Errorf("jsonrpc: decode batch response: %w", err)
+		if isSyntaxError(err) {
+			return nil, fmt.Errorf("jsonrpc: decode batch response: %w", err)
+		}
+		return nil, invalidResponse("batch must be a JSON array: %w", err)
 	}
 	responses := make([]Response, 0, len(elems))
 	for i, elem := range elems {

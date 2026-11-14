@@ -5,6 +5,7 @@ import (
 	jsonv1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -74,14 +75,15 @@ func TestResponseMarshalRejectsInvalidShape(t *testing.T) {
 
 func TestResponseUnmarshalJSONFrom(t *testing.T) {
 	const (
-		fails = iota
+		invalid   = iota // valid JSON, not a response: ErrInvalidResponse
+		malformed        // not JSON: a syntax error
 		success
 		failure
 	)
 	cases := []struct {
 		name string
 		in   string
-		want int // the shape expected, or fails when the decode must not succeed
+		want int // the shape expected, or how the decode must fail
 	}{
 		{"success", `{"jsonrpc":"2.0","result":{"sum":3},"id":1}`, success},
 		{"null result is a success", `{"jsonrpc":"2.0","result":null,"id":1}`, success},
@@ -90,24 +92,31 @@ func TestResponseUnmarshalJSONFrom(t *testing.T) {
 		{"unknown members are tolerated", `{"jsonrpc":"2.0","result":1,"id":1,"extra":true}`, success},
 		{"a structured unknown member is skipped whole", `{"jsonrpc":"2.0","meta":{"a":[1,{"b":2}]},"result":1,"id":1}`, success},
 		{"members in any order", `{"id":1,"result":1,"jsonrpc":"2.0"}`, success},
-		{"non-string jsonrpc", `{"jsonrpc":2.0,"result":1,"id":1}`, fails},
-		{"error is not an object", `{"jsonrpc":"2.0","error":"nope","id":1}`, fails},
-		{"duplicate member inside a nested value", `{"jsonrpc":"2.0","result":{"a":1,"a":2},"id":1}`, fails},
-		{"truncated after a member", `{"jsonrpc":"2.0","result":1,"id":1`, fails},
-		{"both result and error", `{"jsonrpc":"2.0","result":1,"error":{"code":-1,"message":"x"},"id":1}`, fails},
-		{"neither result nor error", `{"jsonrpc":"2.0","id":1}`, fails},
-		{"wrong version", `{"jsonrpc":"1.0","result":1,"id":1}`, fails},
-		{"missing id", `{"jsonrpc":"2.0","result":1}`, fails},
-		{"duplicate member", `{"jsonrpc":"2.0","result":1,"result":2,"id":1}`, fails},
-		{"not an object", `[1]`, fails},
-		{"malformed", `{"jsonrpc":`, fails},
+		{"non-string jsonrpc", `{"jsonrpc":2.0,"result":1,"id":1}`, invalid},
+		{"error is not an object", `{"jsonrpc":"2.0","error":"nope","id":1}`, invalid},
+		{"duplicate member inside a nested value", `{"jsonrpc":"2.0","result":{"a":1,"a":2},"id":1}`, invalid},
+		{"truncated after a member", `{"jsonrpc":"2.0","result":1,"id":1`, malformed},
+		{"both result and error", `{"jsonrpc":"2.0","result":1,"error":{"code":-1,"message":"x"},"id":1}`, invalid},
+		{"neither result nor error", `{"jsonrpc":"2.0","id":1}`, invalid},
+		{"wrong version", `{"jsonrpc":"1.0","result":1,"id":1}`, invalid},
+		{"missing id", `{"jsonrpc":"2.0","result":1}`, invalid},
+		{"duplicate member", `{"jsonrpc":"2.0","result":1,"result":2,"id":1}`, invalid},
+		{"not an object", `[1]`, invalid},
+		{"malformed", `{"jsonrpc":`, malformed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var got Response
 			err := json.Unmarshal([]byte(tc.in), &got)
-			if tc.want == fails {
-				require.Error(t, err)
+			switch tc.want {
+			case invalid:
+				require.ErrorIs(t, err, ErrInvalidResponse)
+				require.Zero(t, got, "a rejected response leaves the receiver untouched")
+				return
+			case malformed:
+				_, isSyntax := errors.AsType[*jsontext.SyntacticError](err)
+				require.True(t, isSyntax, "malformed JSON stays a syntax error: %v", err)
+				require.NotErrorIs(t, err, ErrInvalidResponse)
 				require.Zero(t, got, "a rejected response leaves the receiver untouched")
 				return
 			}
@@ -174,10 +183,17 @@ func TestResponseUnmarshalJSONFromRoundTrip(t *testing.T) {
 func TestDecodeResponsesRejectsBadElement(t *testing.T) {
 	_, err := DecodeResponses([]byte(`[{"jsonrpc":"2.0","result":1,"id":1},{"jsonrpc":"2.0","id":2}]`))
 	require.ErrorContains(t, err, "element 1")
+	require.ErrorIs(t, err, ErrInvalidResponse)
 
 	// A single response is not a batch.
 	_, err = DecodeResponses([]byte(`{"jsonrpc":"2.0","result":1,"id":1}`))
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInvalidResponse)
+
+	// Malformed JSON stays a syntax error.
+	_, err = DecodeResponses([]byte(`[{"jsonrpc":`))
+	require.NotErrorIs(t, err, ErrInvalidResponse)
+	_, isSyntax := errors.AsType[*jsontext.SyntacticError](err)
+	require.True(t, isSyntax)
 }
 
 // An error object whose members are all zero is still an error response: the
